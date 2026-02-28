@@ -17,3 +17,7 @@ python-dotenv>=1.0.1
 
 # 로깅 (선택적 향상)
 colorlog>=6.9.0
+
+# 대시보드 (app.py)
+streamlit>=1.35.0
+plotly>=5.22.0
