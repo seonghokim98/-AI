@@ -177,6 +177,22 @@ def _send(text: str) -> bool:
         return False
 
 
+def send_test() -> bool:
+    """슬랙 연결 테스트 메시지 발송"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = f"""✅ *[테스트 알림]* — {now}
+
+슬랙 웹훅 연결 성공!
+주식 매매 신호 시스템이 정상적으로 슬랙에 메시지를 보낼 수 있습니다.
+
+• 감시 종목: {len(config.WATCHLIST)}개
+• 예산: {config.TOTAL_BUDGET:,}원
+• 스캔 주기: {config.SCAN_INTERVAL_MINUTES}분
+
+> 이 메시지가 보이면 설정이 완료된 것입니다."""
+    return _send(msg)
+
+
 def _confidence_emoji(confidence: float) -> str:
     filled = round(confidence * 5)
     return "⬛" * filled + "⬜" * (5 - filled)

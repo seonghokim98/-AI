@@ -232,6 +232,18 @@ def setup_scheduler() -> None:
 # 엔트리포인트
 # ---------------------------------------------------------------------------
 def main() -> None:
+    # --test 플래그: 슬랙 테스트 메시지 전송 후 종료
+    if "--test" in sys.argv:
+        if not config.SLACK_WEBHOOK_URL:
+            logger.error("SLACK_WEBHOOK_URL 미설정 — .env 파일을 확인하세요")
+            sys.exit(1)
+        logger.info("슬랙 테스트 메시지 발송 중...")
+        if sb.send_test():
+            logger.info("테스트 메시지 전송 성공!")
+        else:
+            logger.error("테스트 메시지 전송 실패 — 웹훅 주소를 확인하세요")
+        sys.exit(0)
+
     logger.info("=" * 60)
     logger.info("주식 매매 신호 시스템 시작")
     logger.info("예산: %d원 / 종목당 %d원", config.TOTAL_BUDGET, config.BUDGET_PER_TRADE)
