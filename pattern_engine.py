@@ -257,8 +257,7 @@ def _check_double_bottom(df: pd.DataFrame) -> Optional[PatternResult]:
     second_half = recent.iloc[idx1 + 5:]
     if second_half.empty:
         return None
-    idx2_rel = int(second_half.idxmin())
-    idx2 = idx1 + 5 + idx2_rel
+    idx2 = int(second_half.idxmin())   # idxmin()은 이미 절댓값 라벨 반환
     val2 = float(recent.iloc[idx2])
 
     # 두 저점의 가격 차이 허용 오차 확인
