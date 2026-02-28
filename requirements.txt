@@ -1,0 +1,19 @@
+# 주식 매매 신호 시스템 의존성
+# Python 3.11+ 권장
+
+# 데이터 수집
+yfinance==0.2.54
+pandas==2.2.3
+numpy==1.26.4
+
+# HTTP 클라이언트 (Slack Webhook, DART API)
+requests==2.32.3
+
+# 스케줄러
+schedule==1.2.2
+
+# 환경변수 관리 (.env 파일 지원)
+python-dotenv==1.0.1
+
+# 로깅 (선택적 향상)
+colorlog==6.9.0
