@@ -70,6 +70,10 @@ def get_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> Optiona
             logger.warning("No data returned for %s", ticker)
             return None
 
+        # 최신 yfinance는 단일 종목도 MultiIndex 컬럼으로 반환 → 첫 레벨만 사용
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+
         df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
         df.dropna(inplace=True)
 
@@ -143,6 +147,11 @@ def get_index_data(ticker: str = "^KS11", period: str = "3mo") -> Optional[pd.Da
         raw = yf.download(ticker, period=period, progress=False, auto_adjust=True)
         if raw.empty:
             return None
+
+        # 최신 yfinance는 단일 종목도 MultiIndex 컬럼으로 반환 → 첫 레벨만 사용
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+
         df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
         df.dropna(inplace=True)
         _set_cache(cache_key, df)
