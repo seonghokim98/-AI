@@ -2,7 +2,7 @@
 # Python 3.11+ 권장
 
 # 데이터 수집
-yfinance==0.2.54
+yfinance>=0.2.54
 pandas==2.2.3
 numpy==1.26.4
 
