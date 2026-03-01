@@ -5,13 +5,21 @@ Streamlit 기반 웹앱 (로컬 실행)
 실행:
     streamlit run app.py
 """
+import json
 import time
 from datetime import datetime
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 from plotly.subplots import make_subplots
+
+try:
+    from bs4 import BeautifulSoup
+    _BS4_OK = True
+except ImportError:
+    _BS4_OK = False
 
 import config
 import data_provider as dp
@@ -39,6 +47,139 @@ def load_market_status() -> dict:
         "foreign_buy_streak": status.foreign_buy_streak,
         "detail": status.detail,
     }
+
+
+@st.cache_data(ttl=300)
+def load_market_indices() -> dict:
+    """주요 글로벌 지수 현재가 / 전일대비 (yfinance)"""
+    index_map = {
+        "코스피":      ("^KS11",    ""),
+        "코스닥":      ("^KQ11",    ""),
+        "S&P 500":    ("^GSPC",    "USD"),
+        "나스닥 100":  ("^NDX",     "USD"),
+        "닛케이 225":  ("^N225",    "JPY"),
+        "항셍":        ("^HSI",     "HKD"),
+        "달러인덱스":  ("DX-Y.NYB", ""),
+        "금 선물":     ("GC=F",     "USD"),
+        "WTI 원유":    ("CL=F",     "USD"),
+        "VIX":         ("^VIX",     ""),
+    }
+    result = {}
+    for name, (ticker, unit) in index_map.items():
+        try:
+            df = dp.get_index_data(ticker, period="5d")
+            if df is not None and len(df) >= 2:
+                cur  = float(df["Close"].iloc[-1])
+                prev = float(df["Close"].iloc[-2])
+                chg  = (cur - prev) / prev * 100
+                result[name] = {"price": cur, "change": chg, "unit": unit, "ticker": ticker}
+        except Exception:
+            pass
+    return result
+
+
+_NAVER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/16.6 Mobile/15E148 Safari/604.1"
+    ),
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+    "Referer": "https://m.stock.naver.com/",
+}
+
+_NAVER_URLS = {
+    "domestic": "https://m.stock.naver.com/domestic/index/KOSPI/total",
+    "overseas": "https://m.stock.naver.com/worldstock/home/USA/discussion/ranking",
+    "overview": "https://m.stock.naver.com/",
+}
+
+
+def _parse_next_data(key: str, nd: dict) -> list[str]:
+    """Next.js __NEXT_DATA__ JSON 에서 뉴스/토론 문자열 목록 추출"""
+    items = []
+    try:
+        props = nd.get("props", {}).get("pageProps", {})
+        # 가능한 키 목록
+        candidates = (
+            props.get("discussions")
+            or props.get("opinions")
+            or props.get("news")
+            or props.get("rankings")
+            or props.get("articles")
+            or []
+        )
+        for obj in candidates[:12]:
+            text = (
+                obj.get("title")
+                or obj.get("headline")
+                or obj.get("content", "")[:80]
+            )
+            text = text.strip()
+            if 5 < len(text) < 200:
+                stock = (
+                    (obj.get("stock") or {}).get("name", "")
+                    or obj.get("market", "")
+                    or obj.get("source", "")
+                )
+                items.append(f"[{stock}] {text}" if stock else text)
+    except Exception:
+        pass
+    return items
+
+
+def _parse_html_fallback(soup) -> list[str]:
+    """BeautifulSoup HTML fallback — 텍스트 블록 추출"""
+    items = []
+    if soup is None:
+        return items
+    for el in soup.find_all(["h3", "h4", "li", "span"], limit=60):
+        text = el.get_text(strip=True)
+        if 10 < len(text) < 160 and text not in items:
+            items.append(text)
+        if len(items) >= 10:
+            break
+    return items
+
+
+@st.cache_data(ttl=600)
+def load_naver_market_news() -> dict:
+    """
+    네이버 증권 모바일 페이지에서 이슈/뉴스/토론 크롤링 (10분 캐시).
+    - Next.js __NEXT_DATA__ JSON 우선 파싱
+    - 실패 시 HTML 직접 파싱 fallback
+    - 전체 실패 시 error 필드에 메시지 반환
+    """
+    result = {k: {"items": [], "error": None} for k in _NAVER_URLS}
+
+    if not _BS4_OK:
+        for k in result:
+            result[k]["error"] = "beautifulsoup4 패키지 미설치 (pip install beautifulsoup4)"
+        return result
+
+    for key, url in _NAVER_URLS.items():
+        try:
+            resp = requests.get(url, headers=_NAVER_HEADERS, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # ① Next.js 내장 JSON 파싱
+            nd_tag = soup.find("script", {"id": "__NEXT_DATA__"})
+            if nd_tag and nd_tag.string:
+                items = _parse_next_data(key, json.loads(nd_tag.string))
+                if items:
+                    result[key]["items"] = items
+                    continue
+
+            # ② HTML 직접 파싱 fallback
+            result[key]["items"] = _parse_html_fallback(soup)
+
+        except requests.Timeout:
+            result[key]["error"] = "연결 시간 초과 (10s)"
+        except Exception as exc:
+            result[key]["error"] = str(exc)[:80]
+
+    return result
 
 
 @st.cache_data(ttl=300)
@@ -145,13 +286,16 @@ def make_chart(df: pd.DataFrame, ticker: str, signal: dict) -> go.Figure:
             opacity=0.5, showlegend=False,
         ), row=1, col=1)
 
-    # 패턴 수평선
-    if signal["패턴"] != "-":
+    # 패턴 수평선 (신호 유형에 따라 색상 차별화)
+    sig_type = signal.get("신호유형", "BUY")
+    entry_color = "#00e5ff" if sig_type == "BUY" else "#ff5252"   # 매수=청록, 매도=빨강
+    if signal.get("패턴") and signal["패턴"] != "-":
         if signal.get("진입가"):
+            label = "진입가" if sig_type == "BUY" else "현재가(매도)"
             fig.add_hline(
-                y=signal["진입가"], line_color="#00e5ff", line_dash="dash", line_width=1.5,
-                annotation_text=f"진입가 {signal['진입가']:,.0f}",
-                annotation_font_color="#00e5ff",
+                y=signal["진입가"], line_color=entry_color, line_dash="dash", line_width=1.5,
+                annotation_text=f"{label} {signal['진입가']:,.0f}",
+                annotation_font_color=entry_color,
                 row=1, col=1,
             )
         if signal.get("지지선"):
@@ -307,6 +451,118 @@ with st.expander("시장 상세 보기"):
         st.caption(f"외국인 {market['foreign_buy_streak']}일 연속 순매수")
     else:
         st.caption("외국인 수급: KIS API 미연동 (외국인 데이터 없음)")
+
+st.divider()
+
+# ─── 국내/해외 증시 이슈 ──────────────────────────────────────────────────────
+
+st.subheader("📰 국내/해외 증시 이슈")
+
+with st.spinner("글로벌 지수 & 이슈 데이터 로딩 중..."):
+    indices    = load_market_indices()
+    naver_news = load_naver_market_news()
+
+tab_kr, tab_us, tab_global = st.tabs(["🇰🇷 국내 증시", "🇺🇸 해외 증시", "🌐 증시 종합"])
+
+# ── 국내 증시 탭 ──────────────────────────────────────────────────────────────
+with tab_kr:
+    kr_keys = ["코스피", "코스닥"]
+    kr_cols = st.columns(len(kr_keys))
+    for col, name in zip(kr_cols, kr_keys):
+        d = indices.get(name)
+        with col:
+            if d:
+                chg = d["change"]
+                arrow = "▲" if chg >= 0 else "▼"
+                color = "normal" if chg >= 0 else "inverse"
+                st.metric(name, f"{d['price']:,.2f}", f"{arrow} {abs(chg):.2f}%",
+                          delta_color=color)
+            else:
+                st.metric(name, "데이터 없음")
+
+    st.markdown("---")
+    st.markdown("**📌 국내 증시 이슈 & 토론** *(네이버 증권)*")
+
+    domestic = naver_news.get("domestic", {})
+    if domestic.get("items"):
+        for i, item in enumerate(domestic["items"], 1):
+            st.markdown(f"{i}. {item}")
+    elif domestic.get("error"):
+        st.caption(f"⚠️ 크롤링 실패: {domestic['error']}")
+        st.info("페이지를 직접 확인하세요.")
+    else:
+        st.caption("뉴스/토론 항목을 불러오지 못했습니다. 아래 링크를 통해 확인하세요.")
+
+    st.link_button(
+        "🔗 네이버 KOSPI 상세 보기 →",
+        "https://m.stock.naver.com/domestic/index/KOSPI/total",
+        use_container_width=True,
+    )
+
+# ── 해외 증시 탭 ──────────────────────────────────────────────────────────────
+with tab_us:
+    us_keys = ["S&P 500", "나스닥 100", "닛케이 225", "항셍"]
+    us_cols = st.columns(len(us_keys))
+    for col, name in zip(us_cols, us_keys):
+        d = indices.get(name)
+        with col:
+            if d:
+                chg = d["change"]
+                arrow = "▲" if chg >= 0 else "▼"
+                color = "normal" if chg >= 0 else "inverse"
+                price_str = f"{d['price']:,.2f}" + (f" {d['unit']}" if d["unit"] else "")
+                st.metric(name, price_str, f"{arrow} {abs(chg):.2f}%",
+                          delta_color=color)
+            else:
+                st.metric(name, "데이터 없음")
+
+    st.markdown("---")
+    st.markdown("**📌 미국 증시 이슈 & 토론** *(네이버 증권)*")
+
+    overseas = naver_news.get("overseas", {})
+    if overseas.get("items"):
+        for i, item in enumerate(overseas["items"], 1):
+            st.markdown(f"{i}. {item}")
+    elif overseas.get("error"):
+        st.caption(f"⚠️ 크롤링 실패: {overseas['error']}")
+    else:
+        st.caption("토론 항목을 불러오지 못했습니다. 아래 링크를 통해 확인하세요.")
+
+    st.link_button(
+        "🔗 네이버 미국 증시 이슈 보기 →",
+        "https://m.stock.naver.com/worldstock/home/USA/discussion/ranking",
+        use_container_width=True,
+    )
+
+# ── 증시 종합 탭 ──────────────────────────────────────────────────────────────
+with tab_global:
+    overview = naver_news.get("overview", {})
+    if overview.get("items"):
+        st.markdown("**📌 증시 종합 뉴스** *(네이버 증권)*")
+        for i, item in enumerate(overview["items"], 1):
+            st.markdown(f"{i}. {item}")
+        st.markdown("---")
+
+    # 전체 지수 테이블
+    st.markdown("**🌐 글로벌 주요 지수 현황**")
+    table_rows = []
+    for name, d in indices.items():
+        chg = d["change"]
+        arrow = "▲" if chg >= 0 else "▼"
+        badge = "🟢" if chg >= 0 else "🔴"
+        table_rows.append({
+            "지수":   name,
+            "현재가": f"{d['price']:,.2f}" + (f" {d['unit']}" if d["unit"] else ""),
+            "전일대비": f"{badge} {arrow} {abs(chg):.2f}%",
+        })
+    if table_rows:
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+    st.link_button(
+        "🔗 네이버 증시 종합 보기 →",
+        "https://m.stock.naver.com/",
+        use_container_width=True,
+    )
 
 st.divider()
 
