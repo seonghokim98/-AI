@@ -55,50 +55,60 @@ class TechnicalConfig:
     ma_mid: int = 20
     ma_long: int = 60
 
-    # 골든크로스 판단 기간
-    golden_cross_lookback: int = 2
-
     # 쌍바닥 판단
     double_bottom_window: int = 30      # 최근 N봉 내 탐색
     double_bottom_tolerance: float = 0.03  # 두 저점 가격 허용 오차 3%
 
-    # 돌파 + 눌림목
-    breakout_window: int = 20           # 저항선 계산 기간
+    # 저항선 계산 기간 (SR Flip / 눌림목 공통)
+    breakout_window: int = 20
     pullback_tolerance: float = 0.03    # 저항선 대비 허용 이탈 3%
     volume_surge_ratio: float = 1.5     # 돌파 시 평균 거래량 대비 1.5배 이상
 
-    # 깃발형 돌파
+    # 깃발형
     flag_pole_min_ratio: float = 0.05   # 깃대 최소 상승률 5%
     flag_consolidation_bars: int = 5    # 깃발 수렴 구간 최소 봉 수
     flag_max_retracement: float = 0.50  # 깃대 대비 최대 되돌림 50%
 
     # RSI
     rsi_period: int = 14
-    rsi_oversold: float = 40.0          # 눌림목 확인 시 RSI 기준 (과도한 매도세 제외)
+    rsi_oversold: float = 40.0          # 과도한 매도세 제외 기준
 
     # 볼린저 밴드
     bb_period: int = 20
     bb_std: float = 2.0
 
-    # 골든크로스 이평선 (이미지 기준: 50선 / 200선 교차)
-    ma_gc_fast: int = 50    # 단기선
-    ma_gc_slow: int = 200   # 장기선
+    # ── [알고리즘] 추격매수 차단 로직 ──────────────────────────────────────
+    rsi_overbought: float = 80.0         # RSI > 80: 매수 비활성화 (절대 금지)
+    disparity_overbought: float = 15.0   # MA20 이격도 > 15%: 매수 금지
 
-    # 하락쐐기형 탐색 구간
-    wedge_window: int = 25
+    # ── [알고리즘] 눌림목 확인 조건 (Find_Pullback_Entry 구현) ──────────────
+    pullback_ma_tolerance: float = 0.02  # MA20 ±2% 이내 접근 (지지선 테스트)
+    volume_dry_ratio: float = 0.5        # 거래량 < 평균 50% (세력 이탈 없음)
+    doji_body_ratio: float = 0.3         # 캔들 몸통 < 전체 범위 30% (도지/하락브레이크)
+
+    # ── 장대양봉 감지 기준 (이평선 눌림목 Setup 조건) ──────────────────────
+    big_candle_min_ratio: float = 0.03   # 몸통 3% 이상 = 장대양봉
+    big_candle_lookback: int = 15        # 최근 N봉 이내 장대양봉 탐색
 
 
 TECH = TechnicalConfig()
 
 # ---------------------------------------------------------------------------
-# 밸류에이션 필터 (매매 원칙)
+# 밸류에이션 필터 (매매 원칙) — [알고리즘] 관심 종목 풀 구성 기준
 # ---------------------------------------------------------------------------
 @dataclass
 class ValuationConfig:
-    max_per: float = 30.0               # 업종 평균 대비가 우선이나, 절대 상한선
-    max_pbr: float = 1.5
-    require_positive_eps: bool = True   # 적자 기업 제외
-    buyback_lookback_days: int = 90     # 최근 N일 내 자사주 공시 확인
+    # ── [알고리즘] 가치 평가지표 (동종업계 대비 저평가 우량주만 필터링) ──────
+    max_per: float = 15.0               # PER < 15 AND PER > 0 (절대 기준)
+    max_pbr: float = 1.0                # PBR < 1.0 (저평가 기준, 순자산 이하)
+    require_positive_eps: bool = True   # 적자 기업 제외 (EPS > 0)
+    buyback_lookback_days: int = 90     # 최근 N일 내 공시 확인
+
+    # ── [알고리즘] 모멘텀 키워드 (가중치 부여 대상) ─────────────────────────
+    # 자사주 매입/소각, 고배당, 밸류업 프로그램 공시 → 관심 종목 풀 우선 편입
+    momentum_keywords: tuple = (
+        "자사주 소각", "자사주 매입", "배당", "고배당", "밸류업"
+    )
 
 
 VALUATION = ValuationConfig()
