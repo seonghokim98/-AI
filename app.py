@@ -36,7 +36,7 @@ st.set_page_config(
 
 # ─── 데이터 로딩 (캐시 5분) ───────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_market_status() -> dict:
     status = mf.analyze_market()
     return {
@@ -49,7 +49,7 @@ def load_market_status() -> dict:
     }
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_market_indices() -> dict:
     """주요 글로벌 지수 현재가 / 전일대비 (yfinance)"""
     index_map = {
@@ -182,7 +182,7 @@ def load_naver_market_news() -> dict:
     return result
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_watchlist_signals() -> list[dict]:
     """감시 종목 전체 스캔 — 현재가 + 매수/매도 패턴 감지"""
     results = []
@@ -369,7 +369,13 @@ def make_chart(df: pd.DataFrame, ticker: str, signal: dict) -> go.Figure:
 
 with st.sidebar:
     st.title("⚙️ 설정")
-    auto_refresh = st.toggle("자동 새로고침 (5분)", value=False)
+    auto_refresh = st.toggle("자동 새로고침", value=False)
+    refresh_interval = st.selectbox(
+        "새로고침 주기",
+        [60, 120, 300],
+        format_func=lambda x: {60: "1분", 120: "2분", 300: "5분"}[x],
+        disabled=not auto_refresh,
+    )
     chart_period = st.selectbox(
         "차트 기간", ["3mo", "6mo", "1y"], index=1,
         format_func=lambda x: {"3mo": "3개월", "6mo": "6개월", "1y": "1년"}[x],
@@ -451,6 +457,58 @@ with st.expander("시장 상세 보기"):
         st.caption(f"외국인 {market['foreign_buy_streak']}일 연속 순매수")
     else:
         st.caption("외국인 수급: KIS API 미연동 (외국인 데이터 없음)")
+
+st.divider()
+
+# ─── 감시 종목 스캔 (전체 페이지 공유) ───────────────────────────────────────
+
+with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)"):
+    signals = load_watchlist_signals()
+
+buy_signals  = [s for s in signals if s.get("신호유형") == "BUY"]
+sell_signals = [s for s in signals if s.get("신호유형") == "SELL"]
+
+# ─── 매수 신호 알림 ────────────────────────────────────────────────────────────
+
+st.subheader("🚨 매수 신호 알림")
+
+if buy_signals:
+    for s in buy_signals:
+        conf   = s.get("신뢰도") or 0
+        filled = round(conf * 5)
+        bar    = "⬛" * filled + "⬜" * (5 - filled)
+        chg    = s["전일대비"]
+        chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
+
+        with st.container(border=True):
+            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 2, 2.5])
+            with c1:
+                st.markdown(f"### {s['종목명']}")
+                st.caption(f"`{s['티커']}` | {s.get('패턴', '-')}")
+            with c2:
+                price = s.get("진입가")
+                st.metric("추천 진입가", f"{price:,.0f}원" if price else "-")
+            with c3:
+                st.metric("전일대비", chg_str)
+            with c4:
+                rsi = s.get("rsi")
+                st.metric("RSI", f"{rsi:.1f}" if rsi else "-")
+            with c5:
+                st.metric("신뢰도", f"{bar} {conf*100:.0f}%")
+                st.success(s.get("행동지침") or "📈 매수 신호")
+else:
+    st.info("현재 매수 신호 종목이 없습니다. 스캔 주기마다 자동으로 재확인합니다.")
+
+if sell_signals:
+    with st.expander(f"📉 매도 경고 종목 {len(sell_signals)}개 보기"):
+        for s in sell_signals:
+            chg = s["전일대비"]
+            chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
+            st.warning(
+                f"**{s['종목명']}** ({s['티커']}) | "
+                f"{s.get('패턴', '-')} | {chg_str} | "
+                f"{s.get('행동지침', '-')}"
+            )
 
 st.divider()
 
@@ -569,64 +627,68 @@ st.divider()
 # ─── 감시 종목 현황 ───────────────────────────────────────────────────────────
 
 st.subheader("📋 감시 종목 현황")
-with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)"):
-    signals = load_watchlist_signals()
 
-buy_count = sum(1 for s in signals if s.get("신호유형") == "BUY")
-sell_count = sum(1 for s in signals if s.get("신호유형") == "SELL")
+buy_count     = len(buy_signals)
+sell_count    = len(sell_signals)
 neutral_count = sum(1 for s in signals if s.get("신호유형") == "NEUTRAL")
 
-col_b, col_s, col_n = st.columns(3)
+col_b, col_s, col_n, col_t = st.columns(4)
 with col_b:
     st.metric("📈 매수 신호", f"{buy_count}개")
 with col_s:
     st.metric("📉 매도 경고", f"{sell_count}개")
 with col_n:
     st.metric("⚠️ 중립/위험", f"{neutral_count}개")
+with col_t:
+    st.metric("🔍 전체 감시", f"{len(signals)}개")
 
-rows = []
-for s in signals:
-    price_str = f"{s['현재가']:,.0f}원" if s["현재가"] else "-"
 
-    chg = s["전일대비"]
-    if chg is not None:
-        arrow = "▲" if chg >= 0 else "▼"
-        chg_str = f"{arrow} {abs(chg):.2f}%"
+def _build_rows(source: list[dict]) -> list[dict]:
+    rows = []
+    for s in source:
+        price_str = f"{s['현재가']:,.0f}원" if s["현재가"] else "-"
+        chg = s["전일대비"]
+        chg_str = (f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%") if chg is not None else "-"
+        conf = s["신뢰도"]
+        if conf is not None:
+            filled = round(conf * 5)
+            conf_str = f"{'⬛' * filled}{'⬜' * (5 - filled)} {conf*100:.0f}%"
+        else:
+            conf_str = "-"
+        sig = s.get("신호유형")
+        signal_icon = {"BUY": "📈 매수신호", "SELL": "📉 매도경고", "NEUTRAL": "⚠️ 위험중립"}.get(sig, "-")
+        rows.append({
+            "종목명":    s["종목명"],
+            "현재가":    price_str,
+            "전일대비":  chg_str,
+            "감지 패턴": s["패턴"],
+            "신뢰도":    conf_str,
+            "신호":      signal_icon,
+            "행동 지침": s.get("행동지침") or "-",
+        })
+    return rows
+
+
+tab_all, tab_buy, tab_sell = st.tabs([
+    f"전체 종목 ({len(signals)})",
+    f"📈 매수 신호만 ({buy_count})",
+    f"📉 매도 경고만 ({sell_count})",
+])
+
+with tab_all:
+    st.dataframe(pd.DataFrame(_build_rows(signals)), use_container_width=True, hide_index=True)
+
+with tab_buy:
+    if buy_signals:
+        st.dataframe(pd.DataFrame(_build_rows(buy_signals)), use_container_width=True, hide_index=True)
     else:
-        chg_str = "-"
+        st.info("현재 매수 신호 종목이 없습니다.")
 
-    conf = s["신뢰도"]
-    if conf is not None:
-        filled = round(conf * 5)
-        bar = "⬛" * filled + "⬜" * (5 - filled)
-        conf_str = f"{bar} {conf*100:.0f}%"
+with tab_sell:
+    if sell_signals:
+        st.dataframe(pd.DataFrame(_build_rows(sell_signals)), use_container_width=True, hide_index=True)
     else:
-        conf_str = "-"
-
-    signal_type = s.get("신호유형")
-    if signal_type == "BUY":
-        signal_icon = "📈 매수신호"
-    elif signal_type == "SELL":
-        signal_icon = "📉 매도경고"
-    elif signal_type == "NEUTRAL":
-        signal_icon = "⚠️ 위험중립"
-    else:
-        signal_icon = "-"
-
-    action = s.get("행동지침") or "-"
-
-    rows.append({
-        "종목명": s["종목명"],
-        "현재가": price_str,
-        "전일대비": chg_str,
-        "감지 패턴": s["패턴"],
-        "신뢰도": conf_str,
-        "신호": signal_icon,
-        "행동 지침": action,
-    })
-
-df_table = pd.DataFrame(rows)
-st.dataframe(df_table, use_container_width=True, hide_index=True)
+        st.success("매도 경고 종목이 없습니다.")
 
 st.divider()
 
@@ -703,6 +765,15 @@ else:
 # ─── 자동 새로고침 ────────────────────────────────────────────────────────────
 
 if auto_refresh:
-    time.sleep(300)
-    st.cache_data.clear()
-    st.rerun()
+    now = time.time()
+    if "next_refresh" not in st.session_state:
+        st.session_state.next_refresh = now + refresh_interval
+    remaining = int(st.session_state.next_refresh - now)
+    if remaining <= 0:
+        st.cache_data.clear()
+        st.session_state.next_refresh = now + refresh_interval
+        st.rerun()
+    else:
+        st.sidebar.caption(f"⏱ 다음 갱신: {remaining}초 후")
+        time.sleep(1)
+        st.rerun()
