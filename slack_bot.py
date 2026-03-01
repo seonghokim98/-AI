@@ -70,6 +70,54 @@ def send_buy_signal(
     return _send(msg)
 
 
+def send_sell_signal(
+    ticker: str,
+    pattern: PatternResult,
+    market: MarketStatus,
+) -> bool:
+    """
+    매도/경고 패턴 슬랙 알림 발송 (이미지 기준 팔아라 경고).
+    signal_type에 따라 아이콘과 메시지 톤을 차별화한다.
+    """
+    name = config.TICKER_NAME.get(ticker, ticker)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    confidence_bar = _confidence_emoji(pattern.confidence)
+
+    if pattern.signal_type == "SELL":
+        icon = "📉"
+        title = "매도 경고 발생"
+    else:
+        icon = "⚠️"
+        title = "위험 중립 경고"
+
+    action = pattern.action or "매도/관망 검토"
+
+    msg = f"""{icon} *[{title}]* — {now}
+
+*종목:* {name} (`{ticker}`)
+*패턴:* {pattern.pattern.value}
+*신뢰도:* {confidence_bar} ({pattern.confidence*100:.0f}%)
+*행동 지침:* `{action}`
+
+*─── 현재 상황 ───*
+• 현재가: *{pattern.entry_price:,.0f}원*
+• 저항선: {pattern.resistance_level:,.0f}원
+• 지지선: {pattern.support_level:,.0f}원
+• RSI: {pattern.rsi:.1f}
+
+*─── 시장 상황 ───*
+• 시장 트렌드: *{market.regime.value}*
+• {market.detail}
+
+*─── 패턴 상세 ───*
+{pattern.detail}
+
+> ⚠️ 이 메시지는 *매도 검토 신호*입니다.
+> 보유 중이라면 손절선 및 리스크를 재확인하세요."""
+
+    return _send(msg)
+
+
 def send_watchlist_signal(
     ticker: str,
     pattern: PatternResult,

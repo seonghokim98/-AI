@@ -43,7 +43,7 @@ def load_market_status() -> dict:
 
 @st.cache_data(ttl=300)
 def load_watchlist_signals() -> list[dict]:
-    """감시 종목 전체 스캔 — 현재가 + 패턴 감지"""
+    """감시 종목 전체 스캔 — 현재가 + 매수/매도 패턴 감지"""
     results = []
     for ticker in config.WATCHLIST:
         name = config.TICKER_NAME.get(ticker, ticker)
@@ -53,7 +53,8 @@ def load_watchlist_signals() -> list[dict]:
             results.append({
                 "종목명": name, "티커": ticker,
                 "현재가": None, "전일대비": None,
-                "패턴": "-", "신뢰도": None,
+                "패턴": "-", "신뢰도": None, "신호유형": None,
+                "행동지침": None,
                 "진입가": None, "저항선": None, "지지선": None,
                 "rsi": None, "패턴상세": None,
             })
@@ -63,7 +64,12 @@ def load_watchlist_signals() -> list[dict]:
         prev_price = float(df["Close"].iloc[-2]) if len(df) > 1 else current_price
         change_pct = (current_price - prev_price) / prev_price * 100
 
-        pattern = pe.detect_patterns(df)
+        # 매수 패턴 우선 탐지 후 매도 패턴 탐지 (매도가 있으면 우선 표시)
+        buy_pattern = pe.detect_patterns(df)
+        sell_pattern = pe.detect_sell_patterns(df)
+
+        # 매도 패턴 우선 표시 (더 중요한 경고)
+        pattern = sell_pattern if sell_pattern is not None else buy_pattern
 
         results.append({
             "종목명": name,
@@ -72,11 +78,16 @@ def load_watchlist_signals() -> list[dict]:
             "전일대비": change_pct,
             "패턴": pattern.pattern.value if pattern else "-",
             "신뢰도": float(pattern.confidence) if pattern else None,
+            "신호유형": pattern.signal_type if pattern else None,
+            "행동지침": pattern.action if pattern else None,
             "진입가": float(pattern.entry_price) if pattern else None,
             "저항선": float(pattern.resistance_level) if pattern else None,
             "지지선": float(pattern.support_level) if pattern else None,
             "rsi": float(pattern.rsi) if pattern else None,
             "패턴상세": pattern.detail if pattern else None,
+            # 매수/매도 패턴 각각 보관 (차트 표시용)
+            "_buy_pattern": buy_pattern,
+            "_sell_pattern": sell_pattern,
         })
     return results
 
@@ -229,6 +240,20 @@ with st.sidebar:
 - 종목당 예산 **{config.BUDGET_PER_TRADE:,}원**
 """)
     st.markdown("---")
+    st.markdown("**패턴 신호 범례**")
+    st.markdown("""
+📈 **사라 경고 (매수)**
+- 상승비기형 → 폭등 대비 (100%)
+- 깃발형 돌파 → 급하게 사 (80%)
+- 역삼각형 돌파 → 급하게 사 (65%)
+
+📉 **팔아라 경고 (매도)**
+- 쌍봉 → 폭락 대비 (100%)
+- 하락깃발 → 빨리 팔아 (80%)
+- 하락 다이아몬드 → 천천히 매도 (65%)
+- 박스권 → 건들지마 위험 (50%)
+""")
+    st.markdown("---")
     if st.button("🗑️ 캐시 초기화", use_container_width=True):
         st.cache_data.clear()
         st.success("캐시 초기화 완료")
@@ -291,8 +316,17 @@ st.subheader("📋 감시 종목 현황")
 with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)"):
     signals = load_watchlist_signals()
 
-signal_count = sum(1 for s in signals if s["패턴"] != "-")
-st.caption(f"총 {len(signals)}개 종목 중 {signal_count}개 패턴 감지됨")
+buy_count = sum(1 for s in signals if s.get("신호유형") == "BUY")
+sell_count = sum(1 for s in signals if s.get("신호유형") == "SELL")
+neutral_count = sum(1 for s in signals if s.get("신호유형") == "NEUTRAL")
+
+col_b, col_s, col_n = st.columns(3)
+with col_b:
+    st.metric("📈 매수 신호", f"{buy_count}개")
+with col_s:
+    st.metric("📉 매도 경고", f"{sell_count}개")
+with col_n:
+    st.metric("⚠️ 중립/위험", f"{neutral_count}개")
 
 rows = []
 for s in signals:
@@ -313,7 +347,17 @@ for s in signals:
     else:
         conf_str = "-"
 
-    signal_icon = "📈 매수신호" if s["패턴"] != "-" else "-"
+    signal_type = s.get("신호유형")
+    if signal_type == "BUY":
+        signal_icon = "📈 매수신호"
+    elif signal_type == "SELL":
+        signal_icon = "📉 매도경고"
+    elif signal_type == "NEUTRAL":
+        signal_icon = "⚠️ 위험중립"
+    else:
+        signal_icon = "-"
+
+    action = s.get("행동지침") or "-"
 
     rows.append({
         "종목명": s["종목명"],
@@ -322,6 +366,7 @@ for s in signals:
         "감지 패턴": s["패턴"],
         "신뢰도": conf_str,
         "신호": signal_icon,
+        "행동 지침": action,
     })
 
 df_table = pd.DataFrame(rows)
@@ -357,17 +402,38 @@ selected_ticker = ticker_options[selected_label]
 selected_signal = next((s for s in signals if s["티커"] == selected_ticker), {})
 
 if selected_signal.get("패턴") and selected_signal["패턴"] != "-":
-    st.info(f"🔍 **{selected_signal['패턴']}** 패턴 감지 | {selected_signal.get('패턴상세', '')}")
-    c1, c2, c3 = st.columns(3)
+    signal_type = selected_signal.get("신호유형", "BUY")
+    action = selected_signal.get("행동지침", "")
+    if signal_type == "SELL":
+        st.error(f"📉 **{selected_signal['패턴']}** 매도 경고 | {action} | {selected_signal.get('패턴상세', '')}")
+    elif signal_type == "NEUTRAL":
+        st.warning(f"⚠️ **{selected_signal['패턴']}** 위험 중립 | {action} | {selected_signal.get('패턴상세', '')}")
+    else:
+        st.info(f"📈 **{selected_signal['패턴']}** 매수 신호 | {action} | {selected_signal.get('패턴상세', '')}")
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         v = selected_signal.get("진입가")
-        st.metric("추천 진입가", f"{v:,.0f}원" if v else "-")
+        label = "현재가" if signal_type in ("SELL", "NEUTRAL") else "추천 진입가"
+        st.metric(label, f"{v:,.0f}원" if v else "-")
     with c2:
-        v = selected_signal.get("지지선")
-        st.metric("지지선 (참고)", f"{v:,.0f}원" if v else "-")
+        v = selected_signal.get("저항선")
+        st.metric("저항선", f"{v:,.0f}원" if v else "-")
     with c3:
+        v = selected_signal.get("지지선")
+        st.metric("지지선", f"{v:,.0f}원" if v else "-")
+    with c4:
         v = selected_signal.get("rsi")
         st.metric("RSI", f"{v:.1f}" if v else "-")
+
+    # 매수/매도 패턴이 동시에 감지된 경우 경고 표시
+    buy_p = selected_signal.get("_buy_pattern")
+    sell_p = selected_signal.get("_sell_pattern")
+    if buy_p and sell_p:
+        st.warning(
+            f"⚡ 매수/매도 패턴 충돌 감지 | "
+            f"매도우선({sell_p.pattern.value}) vs 매수({buy_p.pattern.value}) — 관망 권장"
+        )
 
 with st.spinner("차트 로딩 중..."):
     df_chart = load_ohlcv(selected_ticker, period=chart_period)

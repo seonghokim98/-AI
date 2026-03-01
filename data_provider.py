@@ -44,7 +44,7 @@ def _set_cache(key: str, df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # OHLCV 데이터 수집
 # ---------------------------------------------------------------------------
-def get_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> Optional[pd.DataFrame]:
+def get_ohlcv(ticker: str, period: str = "1y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     종목 OHLCV 데이터를 반환한다.
     yfinance 사용, 한국 종목은 .KS / .KQ 접미사 필요.
@@ -95,6 +95,10 @@ def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df[f"MA{cfg.ma_short}"] = df["Close"].rolling(cfg.ma_short).mean()
     df[f"MA{cfg.ma_mid}"] = df["Close"].rolling(cfg.ma_mid).mean()
     df[f"MA{cfg.ma_long}"] = df["Close"].rolling(cfg.ma_long).mean()
+
+    # 골든크로스용 이평선 (이미지 기준: 50일 / 200일)
+    df[f"MA{cfg.ma_gc_fast}"] = df["Close"].rolling(cfg.ma_gc_fast).mean()
+    df[f"MA{cfg.ma_gc_slow}"] = df["Close"].rolling(cfg.ma_gc_slow).mean()
 
     # 거래량 이동평균
     df["VOL_MA20"] = df["Volume"].rolling(cfg.ma_mid).mean()
@@ -227,7 +231,7 @@ def get_foreign_net_buy(ticker: str, days: int = 5) -> Optional[list]:
 # ---------------------------------------------------------------------------
 # 감시 종목 일괄 수집
 # ---------------------------------------------------------------------------
-def fetch_all_watchlist(period: str = "6mo") -> dict[str, pd.DataFrame]:
+def fetch_all_watchlist(period: str = "1y") -> dict[str, pd.DataFrame]:
     """
     config.WATCHLIST 전체 종목의 OHLCV 데이터를 딕셔너리로 반환.
     """

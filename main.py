@@ -113,17 +113,33 @@ def scan_market() -> None:
 
 
 def _process_ticker(ticker: str, df, market: mf.MarketStatus) -> None:
-    """단일 종목 파이프라인 처리"""
+    """단일 종목 파이프라인 처리 (매수 + 매도 패턴 통합)"""
     name = config.TICKER_NAME.get(ticker, ticker)
 
-    # ── Step 3: 패턴 인식 ────────────────────────────────────────────────
+    # ── Step 3a: 매도/경고 패턴 탐지 (팔아라 경고 — 이미지 기준) ─────────
+    sell_pattern = pe.detect_sell_patterns(df)
+    if sell_pattern is not None and sell_pattern.confidence >= 0.45:
+        logger.info("%s: Sell pattern=%s confidence=%.2f action=%s",
+                    name, sell_pattern.pattern.value,
+                    sell_pattern.confidence, sell_pattern.action)
+        sb.send_sell_signal(ticker, sell_pattern, market)
+        _state.daily_signals.append({
+            "ticker": ticker,
+            "pattern": sell_pattern.pattern.value,
+            "signal_type": sell_pattern.signal_type,
+            "entry": sell_pattern.entry_price,
+            "action": sell_pattern.action,
+            "time": datetime.now().isoformat(),
+        })
+
+    # ── Step 3b: 매수 패턴 탐지 (사라 경고 — 이미지 기준) ───────────────
     pattern = pe.detect_patterns(df)
 
     if pattern is None:
-        logger.debug("%s: No pattern detected", name)
-        return   # 패턴 없음 → 관망 (슬랙 전송 안 함, 조용히 패스)
+        logger.debug("%s: No buy pattern detected", name)
+        return   # 패턴 없음 → 관망
 
-    logger.info("%s: Pattern=%s confidence=%.2f",
+    logger.info("%s: Buy pattern=%s confidence=%.2f",
                 name, pattern.pattern.value, pattern.confidence)
 
     # 신뢰도 임계값 (60% 미만은 무시)
@@ -154,8 +170,10 @@ def _process_ticker(ticker: str, df, market: mf.MarketStatus) -> None:
             _state.daily_signals.append({
                 "ticker": ticker,
                 "pattern": pattern.pattern.value,
+                "signal_type": "BUY",
                 "entry": pattern.entry_price,
                 "stop": risk.stop_loss_price,
+                "action": pattern.action or "매수 검토",
                 "time": datetime.now().isoformat(),
             })
             logger.info("BUY SIGNAL SENT: %s %s @ %.2f",

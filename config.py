@@ -80,6 +80,13 @@ class TechnicalConfig:
     bb_period: int = 20
     bb_std: float = 2.0
 
+    # 골든크로스 이평선 (이미지 기준: 50선 / 200선 교차)
+    ma_gc_fast: int = 50    # 단기선
+    ma_gc_slow: int = 200   # 장기선
+
+    # 하락쐐기형 탐색 구간
+    wedge_window: int = 25
+
 
 TECH = TechnicalConfig()
 
