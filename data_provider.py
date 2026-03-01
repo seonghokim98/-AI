@@ -96,10 +96,6 @@ def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df[f"MA{cfg.ma_mid}"] = df["Close"].rolling(cfg.ma_mid).mean()
     df[f"MA{cfg.ma_long}"] = df["Close"].rolling(cfg.ma_long).mean()
 
-    # 골든크로스용 이평선 (이미지 기준: 50일 / 200일)
-    df[f"MA{cfg.ma_gc_fast}"] = df["Close"].rolling(cfg.ma_gc_fast).mean()
-    df[f"MA{cfg.ma_gc_slow}"] = df["Close"].rolling(cfg.ma_gc_slow).mean()
-
     # 거래량 이동평균
     df["VOL_MA20"] = df["Volume"].rolling(cfg.ma_mid).mean()
 
