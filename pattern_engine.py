@@ -62,6 +62,7 @@ class PatternResult:
     detail: str                # 슬랙 전송용 설명
     signal_type: str = "BUY"   # "BUY" | "SELL" | "NEUTRAL"
     action: str = ""           # 행동 지침 (예: "급하게 사", "빨리 팔아")
+    entry_reason: str = ""     # 추천 진입가 근거 (예: "MA20 지지 확인", "돌파선+0.5%")
 
 
 # ---------------------------------------------------------------------------
@@ -185,23 +186,25 @@ def _check_breakout_pullback(df: pd.DataFrame) -> Optional[PatternResult]:
     # 거래량 확인 (눌림목 구간은 거래량 감소가 정상)
     vol_ok = current["Volume"] < df["VOL_MA20"].iloc[-1] * 1.2
 
-    entry_price = float(current["Close"])
+    current_close = float(current["Close"])
     support = float(df[f"MA{cfg.ma_mid}"].iloc[-1])
 
     confidence = _compute_confidence(
         rsi=rsi, vol_ok=vol_ok, in_zone=in_pullback, base=0.75
     )
+    entry_price, entry_reason = _smart_entry(df, current_close, resistance, "pullback")
 
     return PatternResult(
         pattern=PatternType.BREAKOUT_PULLBACK,
         confidence=confidence,
-        entry_price=round(entry_price, 2),
+        entry_price=entry_price,
         resistance_level=round(resistance, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"저항선 {resistance:,.0f}원 돌파 후 눌림목 재확인 | "
-                f"RSI {rsi:.1f} | 진입가 {entry_price:,.0f}원"),
+                f"RSI {rsi:.1f} | 추천 진입 {entry_reason}"),
     )
 
 
@@ -268,15 +271,17 @@ def _check_flag_breakout(df: pd.DataFrame) -> Optional[PatternResult]:
     support = float(df[f"MA{cfg.ma_mid}"].iloc[-1])
 
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.70)
+    entry_price, entry_reason = _smart_entry(df, current_close, flag_high, "breakout")
 
     return PatternResult(
         pattern=PatternType.FLAG_BREAKOUT,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(flag_high, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"깃대 상승 {pole_low:,.0f}→{pole_high:,.0f}원 ({min_pole*100:.0f}%↑) | "
                 f"깃발 수렴 후 {flag_high:,.0f}원 돌파 | RSI {rsi:.1f}"),
     )
@@ -332,15 +337,17 @@ def _check_double_bottom(df: pd.DataFrame) -> Optional[PatternResult]:
     vol_ok = float(df["Volume"].iloc[-1]) > float(df["VOL_MA20"].iloc[-1])
 
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.65)
+    entry_price, entry_reason = _smart_entry(df, current_close, neckline, "reversal")
 
     return PatternResult(
         pattern=PatternType.DOUBLE_BOTTOM,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(neckline, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"쌍바닥 저점1={val1:,.0f}원 / 저점2={val2:,.0f}원 | "
                 f"넥라인 {neckline:,.0f}원 근접/돌파 | RSI {rsi:.1f}"),
     )
@@ -390,15 +397,17 @@ def _check_golden_cross(df: pd.DataFrame) -> Optional[PatternResult]:
 
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.65)
     confidence = round(min(1.0, confidence + _candle_body_score(df)), 2)
+    entry_price, entry_reason = _smart_entry(df, current_close, support, "reversal")
 
     return PatternResult(
         pattern=PatternType.GOLDEN_CROSS,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(resistance, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"MA{cfg.ma_gc_fast}({ma_fast.iloc[-1]:,.0f}) > "
                 f"MA{cfg.ma_gc_slow}({ma_slow.iloc[-1]:,.0f}) "
                 f"골든크로스 | RSI {rsi:.1f}"),
@@ -444,15 +453,17 @@ def _check_sr_flip(df: pd.DataFrame) -> Optional[PatternResult]:
     support = resistance_level * 0.97
 
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.68)
+    entry_price, entry_reason = _smart_entry(df, current_close, resistance_level, "pullback")
 
     return PatternResult(
         pattern=PatternType.SR_FLIP,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(resistance_level, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"구 저항선 {resistance_level:,.0f}원 → 지지 전환 확인 | "
                 f"현재가 {current_close:,.0f}원 | RSI {rsi:.1f}"),
     )
@@ -540,15 +551,17 @@ def _check_falling_wedge(df: pd.DataFrame) -> Optional[PatternResult]:
     support = float(df[f"MA{cfg.ma_mid}"].iloc[-1])
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_surge, in_zone=True, base=0.70)
     confidence = round(min(1.0, confidence + _candle_body_score(df)), 2)
+    entry_price, entry_reason = _smart_entry(df, current_close, upper_at_now, "breakout")
 
     return PatternResult(
         pattern=PatternType.FALLING_WEDGE,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(upper_at_now, 2),
         support_level=round(support, 2),
         volume_ok=vol_surge,
         rsi=rsi,
+        entry_reason=entry_reason,
         detail=(f"하락쐐기형 상단추세선({upper_at_now:,.0f}원) 돌파 | "
                 f"거래량 수렴→급증 | RSI {rsi:.1f}"),
     )
@@ -616,17 +629,19 @@ def _check_inverse_triangle(df: pd.DataFrame) -> Optional[PatternResult]:
 
     support = float(df[f"MA{cfg.ma_mid}"].iloc[-1])
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.60)
+    entry_price, entry_reason = _smart_entry(df, current_close, upper_at_now, "breakout")
 
     return PatternResult(
         pattern=PatternType.INVERSE_TRIANGLE,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(upper_at_now, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
         signal_type="BUY",
         action="🟢 급하게 사",
+        entry_reason=entry_reason,
         detail=(f"역삼각형 하락저항선({upper_at_now:,.0f}원) 돌파 | "
                 f"저점 지지 확인 | RSI {rsi:.1f}"),
     )
@@ -695,17 +710,19 @@ def _check_ascending_triangle(df: pd.DataFrame) -> Optional[PatternResult]:
     support = l2_val
     confidence = _compute_confidence(rsi=rsi, vol_ok=vol_ok, in_zone=True, base=0.88)
     confidence = round(min(1.0, confidence + _candle_body_score(df)), 2)
+    entry_price, entry_reason = _smart_entry(df, current_close, flat_resistance, "breakout")
 
     return PatternResult(
         pattern=PatternType.ASCENDING_TRIANGLE,
         confidence=confidence,
-        entry_price=round(current_close, 2),
+        entry_price=entry_price,
         resistance_level=round(flat_resistance, 2),
         support_level=round(support, 2),
         volume_ok=vol_ok,
         rsi=rsi,
         signal_type="BUY",
         action="🟢 폭등 대비 매수",
+        entry_reason=entry_reason,
         detail=(f"상승비기형 수평저항({flat_resistance:,.0f}원) 돌파 | "
                 f"저점 상승 추세 | 거래량 급증 | RSI {rsi:.1f}"),
     )
@@ -952,6 +969,69 @@ def _check_box_range(df: pd.DataFrame) -> Optional[PatternResult]:
         detail=(f"박스권 상단={box_high:,.0f}원 / 하단={box_low:,.0f}원 | "
                 f"변동폭 {box_range_ratio*100:.1f}% | RSI {rsi:.1f}"),
     )
+
+
+# ---------------------------------------------------------------------------
+# 스마트 진입가 계산
+# ---------------------------------------------------------------------------
+def _smart_entry(
+    df: pd.DataFrame,
+    current_close: float,
+    key_level: float,
+    mode: str,
+) -> tuple[float, str]:
+    """
+    패턴 유형과 기술 지표를 고려한 스마트 진입가 계산.
+    Returns: (entry_price, reason_string)
+
+    mode:
+      "breakout" - 저항 돌파 직후  → 돌파선+0.5%, 과열 시 MA5 눌림목 대기
+      "pullback" - 눌림목 진입     → MA20 또는 구 저항선(지지 전환) 기준
+      "reversal" - 반전 패턴       → BB 하단 또는 MA20 근처
+    """
+    ma20_col = f"MA{cfg.ma_mid}"    # MA20
+    ma5_col  = f"MA{cfg.ma_short}"  # MA5
+
+    ma20 = (
+        float(df[ma20_col].iloc[-1])
+        if ma20_col in df.columns and pd.notna(df[ma20_col].iloc[-1])
+        else None
+    )
+    ma5 = (
+        float(df[ma5_col].iloc[-1])
+        if ma5_col in df.columns and pd.notna(df[ma5_col].iloc[-1])
+        else None
+    )
+    bb_lower = (
+        float(df["BB_LOWER"].iloc[-1])
+        if "BB_LOWER" in df.columns and pd.notna(df["BB_LOWER"].iloc[-1])
+        else None
+    )
+
+    if mode == "breakout":
+        base = key_level * 1.005
+        # 현재가가 돌파선 대비 2% 이상 올랐다면 MA5 눌림목 대기 권장
+        if current_close > key_level * 1.02 and ma5 and ma5 > key_level:
+            return round(ma5), f"MA5 눌림목 {ma5:,.0f}원 대기 (단기 과열)"
+        return round(base), f"돌파선+0.5% {round(base):,.0f}원"
+
+    elif mode == "pullback":
+        # 눌림목 진입: MA20이 핵심 기준
+        if ma20:
+            if ma20 >= key_level * 0.97:
+                return round(ma20), f"MA20 {round(ma20):,.0f}원 (지지 확인)"
+            return round(key_level), f"지지선 {round(key_level):,.0f}원 (구 저항→지지 전환)"
+        return round(current_close), "현재가 진입 (MA 미산출)"
+
+    elif mode == "reversal":
+        # 반전: BB 하단 → MA20 순서로 보수적 진입가 산정
+        if bb_lower and bb_lower > key_level * 0.95 and bb_lower < current_close:
+            return round(bb_lower * 1.01), f"BB 하단 {round(bb_lower):,.0f}원 근처"
+        if ma20 and ma20 < current_close:
+            return round(ma20), f"MA20 {round(ma20):,.0f}원 근처"
+        return round(current_close), "현재가 진입"
+
+    return round(current_close), "현재가 기준"
 
 
 # ---------------------------------------------------------------------------

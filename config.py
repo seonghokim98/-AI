@@ -147,6 +147,12 @@ WATCHLIST: List[str] = [
     "091990.KQ",   # 셀트리온헬스케어
     "196170.KQ",   # 알테오젠
     "039030.KQ",   # 이오테크닉스
+    # ETF
+    "069500.KS",   # KODEX 200 (코스피200)
+    "229200.KS",   # KODEX KOSDAQ150
+    "091160.KS",   # KODEX 반도체
+    "305720.KS",   # KODEX 2차전지산업
+    "102110.KS",   # TIGER 200
 ]
 
 # 업종 평균 PER (수동 관리, 실제 운용 시 DART/FnGuide 연동 권장)
@@ -196,4 +202,37 @@ TICKER_NAME: dict = {
     "091990.KQ": "셀트리온헬스케어",
     "196170.KQ": "알테오젠",
     "039030.KQ": "이오테크닉스",
+    # ETF
+    "069500.KS": "KODEX 200",
+    "229200.KS": "KODEX KOSDAQ150",
+    "091160.KS": "KODEX 반도체",
+    "305720.KS": "KODEX 2차전지산업",
+    "102110.KS": "TIGER 200",
+}
+
+# 시장 구분 (KOSPI / KOSDAQ / ETF)
+TICKER_MARKET: dict = {
+    # KOSPI
+    "005930.KS": "KOSPI",
+    "000660.KS": "KOSPI",
+    "005380.KS": "KOSPI",
+    "035420.KS": "KOSPI",
+    "051910.KS": "KOSPI",
+    "006400.KS": "KOSPI",
+    "035720.KS": "KOSPI",
+    "207940.KS": "KOSPI",
+    "068270.KS": "KOSPI",
+    "028260.KS": "KOSPI",
+    # KOSDAQ
+    "247540.KQ": "KOSDAQ",
+    "086520.KQ": "KOSDAQ",
+    "091990.KQ": "KOSDAQ",
+    "196170.KQ": "KOSDAQ",
+    "039030.KQ": "KOSDAQ",
+    # ETF
+    "069500.KS": "ETF",
+    "229200.KS": "ETF",
+    "091160.KS": "ETF",
+    "305720.KS": "ETF",
+    "102110.KS": "ETF",
 }

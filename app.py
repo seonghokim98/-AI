@@ -190,14 +190,16 @@ def load_watchlist_signals() -> list[dict]:
         name = config.TICKER_NAME.get(ticker, ticker)
         df = dp.get_ohlcv(ticker)
 
+        market = config.TICKER_MARKET.get(ticker, "KOSPI")
+
         if df is None or df.empty:
             results.append({
-                "종목명": name, "티커": ticker,
+                "종목명": name, "티커": ticker, "시장": market,
                 "현재가": None, "전일대비": None,
                 "패턴": "-", "신뢰도": None, "신호유형": None,
                 "행동지침": None,
                 "진입가": None, "저항선": None, "지지선": None,
-                "rsi": None, "패턴상세": None,
+                "rsi": None, "패턴상세": None, "진입근거": None,
             })
             continue
 
@@ -215,6 +217,7 @@ def load_watchlist_signals() -> list[dict]:
         results.append({
             "종목명": name,
             "티커": ticker,
+            "시장": market,
             "현재가": current_price,
             "전일대비": change_pct,
             "패턴": pattern.pattern.value if pattern else "-",
@@ -222,11 +225,11 @@ def load_watchlist_signals() -> list[dict]:
             "신호유형": pattern.signal_type if pattern else None,
             "행동지침": pattern.action if pattern else None,
             "진입가": float(pattern.entry_price) if pattern else None,
+            "진입근거": pattern.entry_reason if pattern else None,
             "저항선": float(pattern.resistance_level) if pattern else None,
             "지지선": float(pattern.support_level) if pattern else None,
             "rsi": float(pattern.rsi) if pattern else None,
             "패턴상세": pattern.detail if pattern else None,
-            # 매수/매도 패턴 각각 보관 (차트 표시용)
             "_buy_pattern": buy_pattern,
             "_sell_pattern": sell_pattern,
         })
@@ -481,13 +484,16 @@ if buy_signals:
         chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
 
         with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 2, 2.5])
+            c1, c2, c3, c4, c5 = st.columns([2, 2, 1.5, 1.5, 2])
             with c1:
                 st.markdown(f"### {s['종목명']}")
-                st.caption(f"`{s['티커']}` | {s.get('패턴', '-')}")
+                st.caption(f"`{s['티커']}` | {s.get('시장','')} | {s.get('패턴', '-')}")
             with c2:
                 price = s.get("진입가")
                 st.metric("추천 진입가", f"{price:,.0f}원" if price else "-")
+                reason = s.get("진입근거")
+                if reason:
+                    st.caption(f"📌 {reason}")
             with c3:
                 st.metric("전일대비", chg_str)
             with c4:
@@ -655,13 +661,18 @@ def _build_rows(source: list[dict]) -> list[dict]:
             conf_str = f"{'⬛' * filled}{'⬜' * (5 - filled)} {conf*100:.0f}%"
         else:
             conf_str = "-"
+        entry = s.get("진입가")
+        entry_str = f"{entry:,.0f}원" if entry else "-"
         sig = s.get("신호유형")
         signal_icon = {"BUY": "📈 매수신호", "SELL": "📉 매도경고", "NEUTRAL": "⚠️ 위험중립"}.get(sig, "-")
         rows.append({
+            "시장":      s.get("시장", "-"),
             "종목명":    s["종목명"],
             "현재가":    price_str,
             "전일대비":  chg_str,
             "감지 패턴": s["패턴"],
+            "추천 진입가": entry_str,
+            "진입 근거": s.get("진입근거") or "-",
             "신뢰도":    conf_str,
             "신호":      signal_icon,
             "행동 지침": s.get("행동지침") or "-",
@@ -669,14 +680,21 @@ def _build_rows(source: list[dict]) -> list[dict]:
     return rows
 
 
-tab_all, tab_buy, tab_sell = st.tabs([
-    f"전체 종목 ({len(signals)})",
-    f"📈 매수 신호만 ({buy_count})",
-    f"📉 매도 경고만 ({sell_count})",
-])
+def _market_filter(source: list[dict], market: str) -> list[dict]:
+    return [s for s in source if s.get("시장") == market]
 
-with tab_all:
-    st.dataframe(pd.DataFrame(_build_rows(signals)), use_container_width=True, hide_index=True)
+
+kospi_signals  = _market_filter(signals, "KOSPI")
+kosdaq_signals = _market_filter(signals, "KOSDAQ")
+etf_signals    = _market_filter(signals, "ETF")
+
+tab_buy, tab_kospi, tab_kosdaq, tab_etf, tab_all = st.tabs([
+    f"📈 매수 신호 ({buy_count})",
+    f"🏛️ KOSPI ({len(kospi_signals)})",
+    f"📊 KOSDAQ ({len(kosdaq_signals)})",
+    f"📦 ETF ({len(etf_signals)})",
+    f"📋 전체 ({len(signals)})",
+])
 
 with tab_buy:
     if buy_signals:
@@ -684,11 +702,17 @@ with tab_buy:
     else:
         st.info("현재 매수 신호 종목이 없습니다.")
 
-with tab_sell:
-    if sell_signals:
-        st.dataframe(pd.DataFrame(_build_rows(sell_signals)), use_container_width=True, hide_index=True)
-    else:
-        st.success("매도 경고 종목이 없습니다.")
+with tab_kospi:
+    st.dataframe(pd.DataFrame(_build_rows(kospi_signals)), use_container_width=True, hide_index=True)
+
+with tab_kosdaq:
+    st.dataframe(pd.DataFrame(_build_rows(kosdaq_signals)), use_container_width=True, hide_index=True)
+
+with tab_etf:
+    st.dataframe(pd.DataFrame(_build_rows(etf_signals)), use_container_width=True, hide_index=True)
+
+with tab_all:
+    st.dataframe(pd.DataFrame(_build_rows(signals)), use_container_width=True, hide_index=True)
 
 st.divider()
 
