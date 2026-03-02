@@ -34,6 +34,7 @@ import market_filter as mf
 import pattern_engine as pe
 import valuation as vl
 import trade_engine as te
+import slack_bot as sb
 
 # ─── 페이지 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -430,6 +431,33 @@ with st.sidebar:
 """)
 
     st.markdown("---")
+    st.markdown("**📲 슬랙 알림 설정**")
+    slack_ok = bool(config.SLACK_WEBHOOK_URL)
+    if slack_ok:
+        st.success("✅ 슬랙 웹훅 연결됨")
+    else:
+        st.error("❌ SLACK_WEBHOOK_URL 미설정")
+        st.caption(".env 파일에 SLACK_WEBHOOK_URL을 추가하세요.")
+
+    slack_enabled = st.toggle(
+        "매수/매도 감지 시 슬랙 알림",
+        value=slack_ok,
+        disabled=not slack_ok,
+        key="slack_alert_enabled",
+    )
+
+    if slack_ok and st.button("📤 슬랙 테스트 발송", use_container_width=True):
+        if sb.send_test():
+            st.success("테스트 메시지 발송 완료!")
+        else:
+            st.error("발송 실패 — 웹훅 주소를 확인하세요")
+
+    if "slack_sent_log" in st.session_state and st.session_state.slack_sent_log:
+        with st.expander(f"📋 발송 내역 ({len(st.session_state.slack_sent_log)}건)"):
+            for log in reversed(st.session_state.slack_sent_log[-10:]):
+                st.caption(log)
+
+    st.markdown("---")
     if st.button("🗑️ 캐시 초기화", use_container_width=True):
         st.cache_data.clear()
         st.success("캐시 초기화 완료")
@@ -482,6 +510,57 @@ st.divider()
 
 with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)"):
     signals = load_watchlist_signals()
+
+# ─── 슬랙 자동 알림 ────────────────────────────────────────────────────────
+
+def _send_slack_alerts(signals: list) -> None:
+    """
+    매수/매도 신호 감지 시 슬랙으로 자동 알림.
+    session_state로 중복 발송을 방지한다 (당일 동일 종목+패턴은 1회만 발송).
+    """
+    if not st.session_state.get("slack_alert_enabled", False):
+        return
+    if not config.SLACK_WEBHOOK_URL:
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    if "slack_sent_keys" not in st.session_state:
+        st.session_state.slack_sent_keys = set()
+    if "slack_sent_log" not in st.session_state:
+        st.session_state.slack_sent_log = []
+
+    # 날짜가 바뀌면 발송 이력 초기화
+    if st.session_state.get("slack_sent_date") != today:
+        st.session_state.slack_sent_keys = set()
+        st.session_state.slack_sent_date = today
+
+    for s in signals:
+        ticker   = s["티커"]
+        pattern  = s.get("패턴", "-")
+        sig_type = s.get("신호유형")
+
+        if sig_type not in ("BUY", "SELL", "NEUTRAL"):
+            continue
+
+        key = f"{today}_{ticker}_{pattern}_{sig_type}"
+        if key in st.session_state.slack_sent_keys:
+            continue
+
+        sent = False
+        if sig_type == "BUY":
+            sent = sb.send_dashboard_buy_alert(s)
+        elif sig_type in ("SELL", "NEUTRAL"):
+            sent = sb.send_dashboard_sell_alert(s)
+
+        if sent:
+            st.session_state.slack_sent_keys.add(key)
+            log_time = datetime.now().strftime("%H:%M")
+            icon = "🎯" if sig_type == "BUY" else "📉"
+            st.session_state.slack_sent_log.append(
+                f"{log_time} {icon} {s['종목명']} ({pattern})"
+            )
+
+_send_slack_alerts(signals)
 
 buy_signals     = [s for s in signals if s.get("신호유형") == "BUY"]
 sell_signals    = [s for s in signals if s.get("신호유형") == "SELL"]

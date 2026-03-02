@@ -19,7 +19,133 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 메인 발송 함수
+# 대시보드 연동 알림 (app.py → 슬랙 실시간 알림)
+# ---------------------------------------------------------------------------
+
+def send_dashboard_buy_alert(signal: dict) -> bool:
+    """
+    대시보드 매수 타점 포착 시 슬랙 알림.
+    app.py의 load_watchlist_signals() 결과 dict를 직접 받는다.
+    """
+    name    = signal.get("종목명", signal.get("티커", ""))
+    ticker  = signal.get("티커", "")
+    market  = signal.get("시장", "")
+    now     = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    pattern   = signal.get("패턴", "-")
+    conf      = signal.get("신뢰도") or 0
+    conf_bar  = _confidence_emoji(conf)
+    action    = signal.get("행동지침") or "MA20 지정가 매수 검토"
+    reason    = signal.get("진입근거") or ""
+
+    entry    = signal.get("진입가")
+    stop     = signal.get("스탑로스가")
+    target   = signal.get("목표가1R")
+    rr       = signal.get("손익비")
+
+    rsi_v    = signal.get("RSI")
+    disp_v   = signal.get("이격도")
+    chg      = signal.get("전일대비")
+    chg_str  = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
+
+    per_v    = signal.get("PER")
+    pbr_v    = signal.get("PBR")
+    per_ok   = "✅" if signal.get("PER_OK") else "❌"
+    pbr_ok   = "✅" if signal.get("PBR_OK") else "❌"
+    pool_ok  = "✅ 관심 풀 편입" if signal.get("풀편입") else "⚠️ 풀 미편입"
+    pool_st  = signal.get("풀상태", "")
+
+    entry_str  = f"{entry:,.0f}원" if entry else "-"
+    stop_str   = f"{stop:,.0f}원"  if stop  else "-"
+    target_str = f"{target:,.0f}원" if target else "-"
+    rr_str     = f"{rr:.1f}:1" if rr else "-"
+    rsi_str    = f"{rsi_v:.1f}" if rsi_v else "-"
+    disp_str   = f"{disp_v:.1f}%" if disp_v is not None else "-"
+    per_str    = f"PER {per_v:.1f}{per_ok}" if per_v and per_v > 0 else "PER N/A"
+    pbr_str    = f"PBR {pbr_v:.2f}{pbr_ok}" if pbr_v and pbr_v > 0 else "PBR N/A"
+
+    msg = f"""🎯 *[매수 타점 포착]* — {now}
+
+*종목:* {name} (`{ticker}`) | {market}
+*패턴:* {pattern}
+*신뢰도:* {conf_bar} ({conf*100:.0f}%)
+*상태:* {pool_ok} | {pool_st}
+
+*─── 진입 정보 ───*
+• 지정가 (MA20): *{entry_str}*
+• 손절가 (-10%): `{stop_str}` ← 절대 원칙
+• 1차 목표가: {target_str}
+• 손익비: {rr_str}
+
+*─── 기술 지표 ───*
+• RSI: {rsi_str}
+• MA20 이격도: {disp_str}
+• 전일대비: {chg_str}
+
+*─── 밸류에이션 ───*
+• {per_str} | {pbr_str}
+
+*─── 행동 지침 ───*
+`{action}`""" + (f"\n📌 {reason}" if reason else "") + """
+
+> ⚠️ 자동 매수 없음. 반드시 직접 판단 후 주문하세요."""
+
+    return _send(msg)
+
+
+def send_dashboard_sell_alert(signal: dict) -> bool:
+    """
+    대시보드 매도 경고 감지 시 슬랙 알림.
+    app.py의 load_watchlist_signals() 결과 dict를 직접 받는다.
+    """
+    name    = signal.get("종목명", signal.get("티커", ""))
+    ticker  = signal.get("티커", "")
+    market  = signal.get("시장", "")
+    now     = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    pattern  = signal.get("패턴", "-")
+    sig_type = signal.get("신호유형", "SELL")
+    conf     = signal.get("신뢰도") or 0
+    conf_bar = _confidence_emoji(conf)
+    action   = signal.get("행동지침") or "매도/관망 검토"
+
+    entry   = signal.get("진입가")
+    resist  = signal.get("저항선")
+    support = signal.get("지지선")
+    rsi_v   = signal.get("RSI")
+    chg     = signal.get("전일대비")
+    chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
+    detail  = signal.get("패턴상세") or ""
+
+    icon  = "📉" if sig_type == "SELL" else "⚠️"
+    title = "매도 경고 발생" if sig_type == "SELL" else "위험 중립 경고"
+
+    entry_str   = f"{entry:,.0f}원"   if entry   else "-"
+    resist_str  = f"{resist:,.0f}원"  if resist  else "-"
+    support_str = f"{support:,.0f}원" if support else "-"
+    rsi_str     = f"{rsi_v:.1f}"      if rsi_v   else "-"
+
+    msg = f"""{icon} *[{title}]* — {now}
+
+*종목:* {name} (`{ticker}`) | {market}
+*패턴:* {pattern}
+*신뢰도:* {conf_bar} ({conf*100:.0f}%)
+*행동 지침:* `{action}`
+
+*─── 현재 상황 ───*
+• 현재가: *{entry_str}*
+• 저항선: {resist_str}
+• 지지선: {support_str}
+• RSI: {rsi_str}
+• 전일대비: {chg_str}""" + (f"\n\n*─── 패턴 상세 ───*\n{detail}" if detail else "") + """
+
+> ⚠️ 보유 중이라면 손절선 및 리스크를 재확인하세요."""
+
+    return _send(msg)
+
+
+# ---------------------------------------------------------------------------
+# 메인 발송 함수 (main.py 스케줄러용)
 # ---------------------------------------------------------------------------
 def send_buy_signal(
     ticker: str,
@@ -29,7 +155,7 @@ def send_buy_signal(
     market: MarketStatus,
 ) -> bool:
     """
-    매수 신호 슬랙 알림 발송.
+    매수 신호 슬랙 알림 발송 (main.py 스케줄러 파이프라인용).
     모든 필터 통과 조건을 이 함수에서 최종 확인한다.
     """
     name = config.TICKER_NAME.get(ticker, ticker)
@@ -48,11 +174,6 @@ def send_buy_signal(
 • 손절가 (-10%): `{risk.stop_loss_price:,.0f}원` ← 절대 원칙
 • 1차 목표가: {risk.target_price_1r:,.0f}원 (손익비 {risk.reward_risk_ratio:.1f}:1)
 • 2차 목표가: {risk.target_price_2r:,.0f}원
-
-*─── 수량 & 예산 ───*
-• 예산 {config.BUDGET_PER_TRADE:,}원 기준 수량: *{risk.quantity}주*
-• 투입금액: {risk.total_cost:,.0f}원
-• 최대 손실: -{risk.max_loss:,.0f}원
 
 *─── 밸류에이션 ───*
 {valuation.detail}
@@ -234,7 +355,6 @@ def send_test() -> bool:
 주식 매매 신호 시스템이 정상적으로 슬랙에 메시지를 보낼 수 있습니다.
 
 • 감시 종목: {len(config.WATCHLIST)}개
-• 예산: {config.TOTAL_BUDGET:,}원
 • 스캔 주기: {config.SCAN_INTERVAL_MINUTES}분
 
 > 이 메시지가 보이면 설정이 완료된 것입니다."""
