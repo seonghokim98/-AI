@@ -282,6 +282,92 @@ def load_ohlcv(ticker: str, period: str = "6mo"):
     return dp.get_ohlcv(ticker, period=period)
 
 
+@st.cache_data(ttl=300)
+def load_heatmap_data() -> list:
+    """감시 종목 등락률 데이터 (히트맵용)"""
+    dp.prefetch_all_ohlcv()
+    rows = []
+    for ticker in config.WATCHLIST:
+        name = config.TICKER_NAME.get(ticker, ticker)
+        df = dp.get_ohlcv(ticker)
+        if df is not None and len(df) >= 2:
+            cur = float(df["Close"].iloc[-1])
+            prev = float(df["Close"].iloc[-2])
+            chg = (cur - prev) / prev * 100
+            rows.append({
+                "name": name,
+                "ticker": ticker,
+                "change": round(chg, 2),
+                "price": cur,
+                "market": config.TICKER_MARKET.get(ticker, "KOSPI"),
+            })
+    return rows
+
+
+@st.cache_data(ttl=300)
+def load_fear_greed_index() -> dict:
+    """
+    공포/탐욕 지수 계산 (0 = 극도 공포, 100 = 극도 탐욕)
+
+    구성 요소:
+      - VIX 지수 (40%): VIX ≤ 12 → 탐욕, VIX ≥ 40 → 공포
+      - KOSPI 20일 모멘텀 (30%): ±10% 범위를 0~100 매핑
+      - KOSPI MA20 위치 (30%): MA 위=75, MA 아래=25
+    """
+    # VIX
+    try:
+        vix_df = dp.get_index_data("^VIX", "5d")
+        vix = float(vix_df["Close"].iloc[-1]) if vix_df is not None and not vix_df.empty else 20.0
+    except Exception:
+        vix = 20.0
+    vix_score = max(0.0, min(100.0, (40.0 - vix) / 28.0 * 100.0))
+
+    # KOSPI 20일 모멘텀
+    try:
+        kospi = dp.get_index_data("^KS11", "3mo")
+        if kospi is not None and len(kospi) >= 20:
+            pct20 = (float(kospi["Close"].iloc[-1]) - float(kospi["Close"].iloc[-20])) / float(kospi["Close"].iloc[-20]) * 100
+            momentum_score = max(0.0, min(100.0, 50.0 + pct20 * 5.0))
+        else:
+            momentum_score = 50.0
+            pct20 = 0.0
+    except Exception:
+        momentum_score = 50.0
+        pct20 = 0.0
+
+    # KOSPI MA20 위치
+    try:
+        market_st = mf.analyze_market()
+        ma_score = 75.0 if market_st.kospi_above_ma else 25.0
+    except Exception:
+        ma_score = 50.0
+
+    score = int(max(0, min(100, round(0.4 * vix_score + 0.3 * momentum_score + 0.3 * ma_score))))
+
+    if score <= 20:
+        label, color, emoji = "극도 공포", "#c62828", "😱"
+    elif score <= 40:
+        label, color, emoji = "공포", "#ef5350", "😨"
+    elif score <= 60:
+        label, color, emoji = "중립", "#ffa726", "😐"
+    elif score <= 80:
+        label, color, emoji = "탐욕", "#26a69a", "😊"
+    else:
+        label, color, emoji = "극도 탐욕", "#00695c", "🤑"
+
+    return {
+        "score": score,
+        "label": label,
+        "color": color,
+        "emoji": emoji,
+        "vix": round(vix, 2),
+        "vix_score": round(vix_score, 1),
+        "momentum_pct": round(pct20, 2),
+        "momentum_score": round(momentum_score, 1),
+        "ma_score": ma_score,
+    }
+
+
 # ─── 차트 생성 ────────────────────────────────────────────────────────────────
 
 def make_chart(df, ticker: str, signal: dict) -> go.Figure:
@@ -374,6 +460,91 @@ def make_chart(df, ticker: str, signal: dict) -> go.Figure:
     fig.update_yaxes(title_text="RSI", range=[0, 100], row=3, col=1)
     fig.update_xaxes(showgrid=True, gridcolor="#1e2130")
     fig.update_yaxes(showgrid=True, gridcolor="#1e2130")
+    return fig
+
+
+def make_heatmap_chart(heatmap_rows: list) -> go.Figure:
+    """감시 종목 등락률 트리맵 히트맵"""
+    if not heatmap_rows:
+        return None
+
+    labels  = [f"{d['name']}<br>{d['change']:+.2f}%" for d in heatmap_rows]
+    changes = [d["change"] for d in heatmap_rows]
+    custom  = [[d["ticker"], f"{d['price']:,.0f}", f"{d['change']:+.2f}%"] for d in heatmap_rows]
+
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=[""] * len(heatmap_rows),
+        values=[1] * len(heatmap_rows),
+        customdata=custom,
+        marker=dict(
+            colors=changes,
+            colorscale=[
+                [0.0,  "#c62828"],
+                [0.35, "#ef9a9a"],
+                [0.5,  "#37474f"],
+                [0.65, "#80cbc4"],
+                [1.0,  "#00695c"],
+            ],
+            cmid=0,
+            showscale=True,
+            colorbar=dict(title="등락률(%)", ticksuffix="%", len=0.85, thickness=14),
+        ),
+        textfont=dict(size=13, color="white"),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "현재가: %{customdata[1]}원<br>"
+            "등락률: %{customdata[2]}<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        height=300,
+        template="plotly_dark",
+        margin=dict(l=0, r=0, t=4, b=0),
+        paper_bgcolor="#0e1117",
+    )
+    return fig
+
+
+def make_fear_greed_gauge(fg: dict) -> go.Figure:
+    """공포/탐욕 지수 게이지 차트"""
+    score = fg["score"]
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        number={"font": {"size": 52, "color": fg["color"]}},
+        title={"text": f"{fg['emoji']} {fg['label']}", "font": {"size": 16, "color": fg["color"]}},
+        gauge={
+            "axis": {
+                "range": [0, 100],
+                "tickvals": [0, 20, 40, 60, 80, 100],
+                "ticktext": ["0", "20", "40", "60", "80", "100"],
+                "tickfont": {"size": 10, "color": "white"},
+            },
+            "bar": {"color": fg["color"], "thickness": 0.28},
+            "bgcolor": "#0e1117",
+            "bordercolor": "#30363d",
+            "steps": [
+                {"range": [0,  20],  "color": "rgba(198, 40, 40, 0.35)"},
+                {"range": [20, 40],  "color": "rgba(239, 83, 80, 0.28)"},
+                {"range": [40, 60],  "color": "rgba(255, 167, 38, 0.22)"},
+                {"range": [60, 80],  "color": "rgba(38, 166, 154, 0.28)"},
+                {"range": [80, 100], "color": "rgba(0, 105, 92, 0.35)"},
+            ],
+            "threshold": {
+                "line": {"color": "white", "width": 4},
+                "thickness": 0.85,
+                "value": score,
+            },
+        },
+    ))
+    fig.update_layout(
+        height=260,
+        template="plotly_dark",
+        margin=dict(l=20, r=20, t=60, b=10),
+        paper_bgcolor="#0e1117",
+        font=dict(color="white"),
+    )
     return fig
 
 
@@ -505,6 +676,38 @@ with st.expander("시장 상세 보기"):
     st.caption(market["detail"])
     st.caption("외국인 수급: KIS API 미연동" if not market["foreign_buy_streak"]
                else f"외국인 {market['foreign_buy_streak']}일 연속 순매수")
+
+st.divider()
+
+# ─── 히트맵 & 공포/탐욕 지수 ──────────────────────────────────────────────────
+
+st.subheader("🗺️ 감시 종목 히트맵 & 공포/탐욕 지수")
+
+_hm_col, _fg_col = st.columns([3, 1], gap="medium")
+
+with _hm_col:
+    st.caption("감시 종목 등락률 히트맵 (초록=상승 / 빨강=하락)")
+    with st.spinner("히트맵 로딩 중..."):
+        _hm_data = load_heatmap_data()
+    _hm_fig = make_heatmap_chart(_hm_data)
+    if _hm_fig:
+        st.plotly_chart(_hm_fig, use_container_width=True)
+    else:
+        st.info("히트맵 데이터를 불러오지 못했습니다.")
+
+with _fg_col:
+    st.caption("공포/탐욕 지수 (VIX·모멘텀·MA 위치 기반)")
+    with st.spinner("지수 계산 중..."):
+        _fg = load_fear_greed_index()
+    _fg_fig = make_fear_greed_gauge(_fg)
+    if _fg_fig:
+        st.plotly_chart(_fg_fig, use_container_width=True)
+    with st.expander("구성 요소 보기"):
+        st.caption(f"VIX: {_fg['vix']:.1f} → 점수 {_fg['vix_score']:.0f}/100 (비중 40%)")
+        st.caption(f"KOSPI 20일 모멘텀: {_fg.get('momentum_pct', 0):+.2f}% → 점수 {_fg['momentum_score']:.0f}/100 (비중 30%)")
+        ma_label = "MA 위 (강세)" if _fg["ma_score"] >= 50 else "MA 아래 (약세)"
+        st.caption(f"KOSPI MA20 위치: {ma_label} → 점수 {_fg['ma_score']:.0f}/100 (비중 30%)")
+        st.caption("⚠️ 참고용 보조 지표입니다. 단독 매매 근거로 사용 금지.")
 
 st.divider()
 

@@ -10,7 +10,14 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import requests
 import yfinance as yf
+
+try:
+    from bs4 import BeautifulSoup as _BS
+    _BS4_OK = True
+except ImportError:
+    _BS4_OK = False
 
 import config
 
@@ -162,17 +169,92 @@ def get_index_data(ticker: str = "^KS11", period: str = "3mo") -> Optional[pd.Da
 
 
 # ---------------------------------------------------------------------------
+# 네이버 금융 스크래핑 — 한국 종목 PER / PBR / EPS
+# ---------------------------------------------------------------------------
+_NAVER_FIN_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+    "Referer": "https://finance.naver.com/",
+}
+
+
+def _parse_naver_num(el) -> Optional[float]:
+    """네이버 금융 em 태그 → float 변환"""
+    if el is None:
+        return None
+    text = el.get_text(strip=True).replace(",", "").replace("배", "").replace("원", "")
+    try:
+        v = float(text)
+        return v if v != 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _fetch_naver_fundamentals(ticker: str) -> dict:
+    """
+    네이버 금융 종목 메인 페이지에서 PER / PBR / EPS 스크래핑.
+    한국 종목(.KS / .KQ)에만 적용.
+    beautifulsoup4 미설치 시 빈 dict 반환.
+    """
+    if not _BS4_OK:
+        return {}
+
+    code = ticker.split(".")[0]
+    url = f"https://finance.naver.com/item/main.naver?code={code}"
+    try:
+        resp = requests.get(url, headers=_NAVER_FIN_HEADERS, timeout=10)
+        resp.encoding = "euc-kr"
+        soup = _BS(resp.text, "html.parser")
+
+        per = _parse_naver_num(soup.select_one("em#_per"))
+        eps = _parse_naver_num(soup.select_one("em#_eps"))
+        pbr = _parse_naver_num(soup.select_one("em#_pbr"))
+
+        if any(v is not None for v in [per, eps, pbr]):
+            logger.debug("Naver fundamentals OK for %s: PER=%s PBR=%s EPS=%s", ticker, per, pbr, eps)
+            return {"per": per, "pbr": pbr, "eps": eps}
+        return {}
+    except Exception as exc:
+        logger.warning("Naver fundamentals scraping failed for %s: %s", ticker, exc)
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # 종목 기본 정보 (PER, PBR 등 펀더멘털)
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=64)
 def get_fundamentals(ticker: str) -> dict:
     """
-    yfinance를 통해 PER, PBR, EPS, 배당수익률 등 반환.
-    장중에는 캐시되어 반복 호출 최소화.
+    PER, PBR, EPS, 배당수익률 등 반환.
+    한국 종목(.KS/.KQ): 네이버 금융 스크래핑 우선, 실패 시 yfinance 폴백.
+    해외 종목: yfinance 사용.
 
     Returns:
         {'per': float, 'pbr': float, 'eps': float, 'market_cap': int, ...}
     """
+    # ── 한국 종목 → 네이버 금융 우선 ──────────────────────────────────────
+    if ".KS" in ticker or ".KQ" in ticker:
+        naver = _fetch_naver_fundamentals(ticker)
+        if naver.get("per") or naver.get("pbr") or naver.get("eps"):
+            # 시가총액 등 추가 정보는 yfinance에서 보완
+            try:
+                info = yf.Ticker(ticker).info
+                naver.setdefault("market_cap", info.get("marketCap"))
+                naver.setdefault("sector", info.get("sector", ""))
+                naver.setdefault("industry", info.get("industry", ""))
+                naver.setdefault("dividend_yield", info.get("dividendYield"))
+                naver.setdefault("52w_high", info.get("fiftyTwoWeekHigh"))
+                naver.setdefault("52w_low", info.get("fiftyTwoWeekLow"))
+                naver.setdefault("shares_outstanding", info.get("sharesOutstanding"))
+            except Exception:
+                pass
+            return naver
+
+    # ── 해외 종목 또는 네이버 실패 → yfinance ─────────────────────────────
     try:
         info = yf.Ticker(ticker).info
         return {
