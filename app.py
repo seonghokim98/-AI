@@ -732,6 +732,9 @@ with st.expander("시장 상세 보기"):
 
 st.divider()
 
+# ─── 실시간 가격 사전 로드 (히트맵 + 감시종목 현황 공통 사용, 30초 TTL) ───────
+_rt_prices = load_realtime_prices()
+
 # ─── 히트맵 & 공포/탐욕 지수 ──────────────────────────────────────────────────
 
 st.subheader("🗺️ 감시 종목 히트맵 & 공포/탐욕 지수")
@@ -742,6 +745,15 @@ with _hm_col:
     st.caption("감시 종목 등락률 히트맵 (초록=상승 / 빨강=하락)")
     with st.spinner("히트맵 로딩 중..."):
         _hm_data = load_heatmap_data()
+    # 실시간 가격 반영 (네이버 금융 폴링 API)
+    if _rt_prices:
+        _hm_data = [
+            {**d,
+             "price":  _rt_prices[d["ticker"]]["price"],
+             "change": round(_rt_prices[d["ticker"]]["change_pct"], 2)}
+            if d["ticker"] in _rt_prices else d
+            for d in _hm_data
+        ]
     _hm_fig = make_heatmap_chart(_hm_data)
     if _hm_fig:
         st.plotly_chart(_hm_fig, use_container_width=True)
@@ -770,7 +782,7 @@ with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)")
     signals = load_watchlist_signals()
 
 # ─── 실시간 현재가 반영 (네이버 금융 폴링 API, 30초 TTL) ────────────────────
-_rt_prices = load_realtime_prices()
+# _rt_prices 는 히트맵 섹션에서 이미 로드됨 (load_realtime_prices 캐시 공유)
 if _rt_prices:
     _updated_signals = []
     for _s in signals:

@@ -303,6 +303,19 @@ _NAVER_POLLING_HDR = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
+# 네이버 모바일 API (폴링 API 실패 시 폴백)
+_NAVER_MOBILE_BASE = "https://m.stock.naver.com/api"
+_NAVER_MOBILE_HDR = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/16.6 Mobile/15E148 Safari/604.1"
+    ),
+    "Accept": "application/json",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://m.stock.naver.com/",
+}
+
 # yfinance 티커 → 네이버 폴링 API 지수 코드 매핑
 _YF_TO_NAVER_INDEX: dict = {
     "^KS11":    "KOSPI",
@@ -336,9 +349,62 @@ def _parse_polling_item(item: dict) -> Optional[dict]:
     return None
 
 
+def _parse_mobile_response(data: dict) -> Optional[dict]:
+    """
+    네이버 모바일 API 응답 파싱 (필드명이 버전마다 다를 수 있어 다중 시도).
+    updown/fluctuations: "2"=상승, "5"=하락, "1"=보합
+    """
+    try:
+        price_raw = (data.get("closePrice") or data.get("currentPrice")
+                     or data.get("stockEndPrice") or "")
+        ratio_raw = (data.get("changesRatio") or data.get("fluctuationsRatio")
+                     or data.get("changeRate") or "")
+        updown    = str(data.get("updown") or data.get("fluctuations") or "1")
+
+        if not price_raw or not ratio_raw:
+            return None
+
+        price = float(str(price_raw).replace(",", ""))
+        ratio = float(str(ratio_raw).replace(",", "").replace("%", ""))
+
+        if updown == "5":
+            ratio = -abs(ratio)
+        else:
+            ratio = abs(ratio)
+
+        if price > 0:
+            return {"price": price, "change": 0.0, "change_pct": ratio}
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _fetch_naver_mobile_index(naver_code: str) -> Optional[dict]:
+    """네이버 모바일 API로 단일 지수 조회 (폴링 API 실패 시 폴백)"""
+    url = f"{_NAVER_MOBILE_BASE}/index/{naver_code}/price"
+    try:
+        resp = requests.get(url, headers=_NAVER_MOBILE_HDR, timeout=5)
+        return _parse_mobile_response(resp.json())
+    except Exception as exc:
+        logger.warning("Naver mobile index API failed for %s: %s", naver_code, exc)
+    return None
+
+
+def _fetch_naver_mobile_stock(code: str) -> Optional[dict]:
+    """네이버 모바일 API로 단일 종목 실시간 시세 조회 (폴링 API 실패 시 폴백)"""
+    url = f"{_NAVER_MOBILE_BASE}/stock/{code}/price"
+    try:
+        resp = requests.get(url, headers=_NAVER_MOBILE_HDR, timeout=5)
+        return _parse_mobile_response(resp.json())
+    except Exception as exc:
+        logger.warning("Naver mobile stock API failed for %s: %s", code, exc)
+    return None
+
+
 def fetch_naver_realtime_indices(yf_tickers: list) -> dict:
     """
-    네이버 금융 폴링 API에서 여러 지수 실시간 데이터를 일괄 조회.
+    네이버 금융에서 여러 지수 실시간 데이터를 조회.
+    1차: 폴링 API (배치) → 2차: 모바일 API (개별, 폴백)
 
     Args:
         yf_tickers: yfinance 티커 리스트 (예: ["^KS11", "^KQ11", "^GSPC"])
@@ -350,13 +416,13 @@ def fetch_naver_realtime_indices(yf_tickers: list) -> dict:
         return {}
 
     naver_to_yf = {v: k for k, v in ticker_to_naver.items()}
+    # ":","," 를 URL-인코딩하지 않도록 raw URL로 직접 구성
     query = ",".join(f"SERVICE_INDEX:{nc}" for nc in ticker_to_naver.values())
 
     result = {}
     try:
         resp = requests.get(
-            _NAVER_POLLING_URL,
-            params={"query": query},
+            f"{_NAVER_POLLING_URL}?query={query}",   # params= 미사용 (인코딩 방지)
             headers=_NAVER_POLLING_HDR,
             timeout=6,
         )
@@ -372,12 +438,21 @@ def fetch_naver_realtime_indices(yf_tickers: list) -> dict:
                     result[yf_tk] = parsed
     except Exception as exc:
         logger.warning("Naver polling index API failed: %s", exc)
+
+    # 폴링 API에서 누락된 지수 → 모바일 API 폴백
+    for naver_code, yf_tk in naver_to_yf.items():
+        if yf_tk not in result:
+            parsed = _fetch_naver_mobile_index(naver_code)
+            if parsed:
+                result[yf_tk] = parsed
+
     return result
 
 
 def fetch_naver_realtime_prices(kr_codes: list) -> dict:
     """
-    네이버 금융 폴링 API에서 한국 종목 실시간 시세 일괄 조회.
+    네이버 금융에서 한국 종목 실시간 시세 일괄 조회.
+    1차: 폴링 API (배치) → 2차: 모바일 API (개별, 폴백)
 
     Args:
         kr_codes: 6자리 종목 코드 리스트 (예: ["005930", "000660"])
@@ -391,11 +466,11 @@ def fetch_naver_realtime_prices(kr_codes: list) -> dict:
     result = {}
     for i in range(0, len(kr_codes), BATCH):
         batch = kr_codes[i: i + BATCH]
+        # ":","," 를 URL-인코딩하지 않도록 raw URL로 직접 구성
         query = ",".join(f"SERVICE_ITEM:{c}" for c in batch)
         try:
             resp = requests.get(
-                _NAVER_POLLING_URL,
-                params={"query": query},
+                f"{_NAVER_POLLING_URL}?query={query}",   # params= 미사용 (인코딩 방지)
                 headers=_NAVER_POLLING_HDR,
                 timeout=8,
             )
@@ -410,6 +485,14 @@ def fetch_naver_realtime_prices(kr_codes: list) -> dict:
                         result[code] = parsed
         except Exception as exc:
             logger.warning("Naver polling stock API failed (batch %d): %s", i, exc)
+
+    # 폴링 API에서 누락된 종목 → 모바일 API 폴백
+    for code in kr_codes:
+        if code not in result:
+            parsed = _fetch_naver_mobile_stock(code)
+            if parsed:
+                result[code] = parsed
+
     return result
 
 
