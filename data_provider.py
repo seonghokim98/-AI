@@ -1,9 +1,10 @@
 """
 data_provider.py - 시장 데이터 수집 모듈
-yfinance 기반 OHLCV + 지표 데이터 제공
-한국투자증권 REST API 연동 옵션 포함
+네이버 증권 모바일 API 기반 (실시간, 지연 없음)
+yfinance는 네이버 미지원 데이터의 폴백으로만 사용
 """
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional
@@ -11,7 +12,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import requests
-import yfinance as yf
+
+try:
+    import yfinance as yf
+    _YF_OK = True
+except ImportError:
+    _YF_OK = False
 
 try:
     from bs4 import BeautifulSoup as _BS
@@ -49,27 +55,147 @@ def _set_cache(key: str, df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
-# OHLCV 데이터 수집
+# 네이버 모바일 API — OHLCV 헬퍼 (실시간, 지연 없음)
+# ---------------------------------------------------------------------------
+
+def _period_to_count(period: str, default: int = 260) -> int:
+    """period 문자열 → 필요 봉 수 변환 (거래일 기준)"""
+    return {"1mo": 33, "3mo": 70, "6mo": 135, "1y": 265, "2y": 530}.get(period, default)
+
+
+def _parse_naver_rows(values: list, price_key: str = "closePrice") -> list:
+    """
+    네이버 API tradingValues 배열 → (date, open, high, low, close, volume) 파싱.
+    종목은 closePrice, 지수는 closeIndex 사용.
+    """
+    rows = []
+    open_key  = "openIndex"  if "Index" in price_key else "openPrice"
+    high_key  = "highIndex"  if "Index" in price_key else "highPrice"
+    low_key   = "lowIndex"   if "Index" in price_key else "lowPrice"
+
+    for item in values:
+        try:
+            date_str = str(item.get("localDate", ""))
+            if len(date_str) != 8:
+                continue
+            dt = datetime.strptime(date_str, "%Y%m%d")
+
+            def _fv(*keys):
+                for k in keys:
+                    v = item.get(k)
+                    if v is not None:
+                        try:
+                            return float(str(v).replace(",", ""))
+                        except (ValueError, TypeError):
+                            pass
+                return 0.0
+
+            close_p = _fv(price_key, "closePrice", "closeIndex")
+            open_p  = _fv(open_key,  "openPrice",  "openIndex")
+            high_p  = _fv(high_key,  "highPrice",  "highIndex")
+            low_p   = _fv(low_key,   "lowPrice",   "lowIndex")
+            vol     = _fv("accumulatedTradingVolume", "tradeVolume")
+
+            if close_p > 0:
+                rows.append((dt, open_p or close_p, high_p or close_p,
+                              low_p or close_p, close_p, vol))
+        except (ValueError, TypeError):
+            continue
+    return rows
+
+
+def _rows_to_df(rows: list) -> Optional[pd.DataFrame]:
+    if not rows:
+        return None
+    df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+    df.set_index("Date", inplace=True)
+    df.sort_index(inplace=True)
+    return df
+
+
+def _fetch_naver_stock_ohlcv(code: str, count: int = 265) -> Optional[pd.DataFrame]:
+    """네이버 모바일 API — 한국 종목 일봉 OHLCV 반환"""
+    url = f"{_NAVER_MOBILE_BASE}/stock/{code}/sise/day"
+    try:
+        resp = requests.get(
+            url,
+            params={"timeframe": "day", "count": count, "requestType": 0},
+            headers=_NAVER_MOBILE_HDR,
+            timeout=12,
+        )
+        data = resp.json()
+        values = data.get("tradingValues") or data.get("priceValues") or []
+        rows = _parse_naver_rows(values, price_key="closePrice")
+        df = _rows_to_df(rows)
+        if df is not None:
+            logger.debug("Naver stock OHLCV OK [%s]: %d bars", code, len(df))
+        return df
+    except Exception as exc:
+        logger.warning("Naver stock OHLCV failed [%s]: %s", code, exc)
+        return None
+
+
+def _fetch_naver_index_ohlcv(naver_code: str, count: int = 70) -> Optional[pd.DataFrame]:
+    """네이버 모바일 API — 지수 일봉 OHLCV (KOSPI, KOSDAQ, VIX 등)"""
+    url = f"{_NAVER_MOBILE_BASE}/index/{naver_code}/sise/day"
+    try:
+        resp = requests.get(
+            url,
+            params={"timeframe": "day", "count": count},
+            headers=_NAVER_MOBILE_HDR,
+            timeout=10,
+        )
+        data = resp.json()
+        values = data.get("tradingValues") or []
+        rows = _parse_naver_rows(values, price_key="closeIndex")
+        df = _rows_to_df(rows)
+        if df is not None:
+            logger.debug("Naver index OHLCV OK [%s]: %d bars", naver_code, len(df))
+        return df
+    except Exception as exc:
+        logger.warning("Naver index OHLCV failed [%s]: %s", naver_code, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# OHLCV 데이터 수집 (네이버 우선 → yfinance 폴백)
 # ---------------------------------------------------------------------------
 def get_ohlcv(ticker: str, period: str = "1y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
-    종목 OHLCV 데이터를 반환한다.
-    yfinance 사용, 한국 종목은 .KS / .KQ 접미사 필요.
+    종목 OHLCV 데이터 반환.
+    1차: 네이버 모바일 API (실시간, 지연 없음)
+    2차: yfinance 폴백 (네이버 실패 시)
 
     Args:
-        ticker: 'AAPL', '005930.KS' 등
-        period:  '1mo', '3mo', '6mo', '1y'
-        interval: '1d', '1h', '5m'
-
-    Returns:
-        DataFrame with columns: Open, High, Low, Close, Volume
-        실패 시 None
+        ticker: '005930.KS', 'AAPL' 등
+        period: '1mo', '3mo', '6mo', '1y'
+        interval: '1d' (일봉만 네이버 지원)
     """
     cache_key = f"{ticker}_{period}_{interval}"
     cached = _get_cache(cache_key)
     if cached is not None:
         return cached
 
+    df = None
+
+    # ── 1차: 네이버 모바일 API (한국 종목 + 일봉) ───────────────────────
+    if (".KS" in ticker or ".KQ" in ticker) and interval == "1d":
+        code  = ticker.split(".")[0]
+        count = _period_to_count(period)
+        df    = _fetch_naver_stock_ohlcv(code, count=count)
+        if df is not None:
+            df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            df.dropna(inplace=True)
+            if len(df) >= config.TECH.ma_long:
+                df = _add_indicators(df)
+                _set_cache(cache_key, df)
+                return df
+        df = None  # 데이터 부족 → yfinance 폴백
+
+    # ── 2차: yfinance 폴백 ─────────────────────────────────────────────
+    if not _YF_OK:
+        logger.error("yfinance not available and Naver failed for %s", ticker)
+        return None
     try:
         raw = yf.download(ticker, period=period, interval=interval,
                           progress=False, auto_adjust=True)
@@ -77,14 +203,11 @@ def get_ohlcv(ticker: str, period: str = "1y", interval: str = "1d") -> Optional
             logger.warning("No data returned for %s", ticker)
             return None
 
-        # 최신 yfinance는 단일 종목도 MultiIndex 컬럼으로 반환 → 첫 레벨만 사용
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
 
         df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
         df.dropna(inplace=True)
-
-        # 이동평균 및 거래량 지표 사전 계산
         df = _add_indicators(df)
         _set_cache(cache_key, df)
         return df
@@ -139,23 +262,36 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 # ---------------------------------------------------------------------------
-# 지수 데이터
+# 지수 데이터 (네이버 우선 → yfinance 폴백)
 # ---------------------------------------------------------------------------
 def get_index_data(ticker: str = "^KS11", period: str = "3mo") -> Optional[pd.DataFrame]:
     """
-    코스피(^KS11), 코스닥(^KQ11), VIX(^VIX) 등 지수 데이터 반환
+    코스피(^KS11), 코스닥(^KQ11), VIX(^VIX) 등 지수 데이터 반환.
+    1차: 네이버 모바일 API (실시간)
+    2차: yfinance 폴백
     """
     cache_key = f"index_{ticker}_{period}"
     cached = _get_cache(cache_key)
     if cached is not None:
         return cached
 
+    # ── 1차: 네이버 모바일 API ──────────────────────────────────────────
+    naver_code = _YF_TO_NAVER_INDEX.get(ticker)
+    if naver_code:
+        count = _period_to_count(period, default=70)
+        df = _fetch_naver_index_ohlcv(naver_code, count=count)
+        if df is not None and not df.empty:
+            _set_cache(cache_key, df)
+            return df
+
+    # ── 2차: yfinance 폴백 ─────────────────────────────────────────────
+    if not _YF_OK:
+        return None
     try:
         raw = yf.download(ticker, period=period, progress=False, auto_adjust=True)
         if raw.empty:
             return None
 
-        # 최신 yfinance는 단일 종목도 MultiIndex 컬럼으로 반환 → 첫 레벨만 사용
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
 
@@ -226,35 +362,65 @@ def _fetch_naver_fundamentals(ticker: str) -> dict:
 # ---------------------------------------------------------------------------
 # 종목 기본 정보 (PER, PBR 등 펀더멘털)
 # ---------------------------------------------------------------------------
+def _fetch_naver_stock_basic(code: str) -> dict:
+    """
+    네이버 모바일 API — 종목 기본정보 (시가총액, 52주 고저, 배당수익률 등).
+    PER/PBR/EPS는 _fetch_naver_fundamentals() 에서 가져오므로 여기선 보완 데이터만.
+    """
+    url = f"{_NAVER_MOBILE_BASE}/stock/{code}/basic"
+    try:
+        resp = requests.get(url, headers=_NAVER_MOBILE_HDR, timeout=8)
+        data = resp.json()
+
+        def _fv(k):
+            v = data.get(k)
+            if v is None:
+                return None
+            try:
+                return float(str(v).replace(",", "").replace("%", ""))
+            except (ValueError, TypeError):
+                return None
+
+        return {
+            "market_cap":        _fv("marketValue"),
+            "dividend_yield":    _fv("dividendRate"),
+            "52w_high":          _fv("fiftyTwoWeekHigh"),
+            "52w_low":           _fv("fiftyTwoWeekLow"),
+            "shares_outstanding": _fv("totalIssueAmount"),
+        }
+    except Exception as exc:
+        logger.debug("Naver stock basic failed for %s: %s", code, exc)
+        return {}
+
+
 @lru_cache(maxsize=64)
 def get_fundamentals(ticker: str) -> dict:
     """
     PER, PBR, EPS, 배당수익률 등 반환.
-    한국 종목(.KS/.KQ): 네이버 금융 스크래핑 우선, 실패 시 yfinance 폴백.
+    한국 종목: 네이버 금융 스크래핑 + 모바일 API 우선, yfinance 폴백.
     해외 종목: yfinance 사용.
 
     Returns:
         {'per': float, 'pbr': float, 'eps': float, 'market_cap': int, ...}
     """
-    # ── 한국 종목 → 네이버 금융 우선 ──────────────────────────────────────
+    # ── 한국 종목 → 네이버 우선 ───────────────────────────────────────────
     if ".KS" in ticker or ".KQ" in ticker:
-        naver = _fetch_naver_fundamentals(ticker)
+        code  = ticker.split(".")[0]
+        naver = _fetch_naver_fundamentals(ticker)   # PER / PBR / EPS
+
+        # 시가총액 등 보완 데이터는 네이버 모바일 API에서
+        basic = _fetch_naver_stock_basic(code)
+        for k, v in basic.items():
+            if v is not None:
+                naver.setdefault(k, v)
+
         if naver.get("per") or naver.get("pbr") or naver.get("eps"):
-            # 시가총액 등 추가 정보는 yfinance에서 보완
-            try:
-                info = yf.Ticker(ticker).info
-                naver.setdefault("market_cap", info.get("marketCap"))
-                naver.setdefault("sector", info.get("sector", ""))
-                naver.setdefault("industry", info.get("industry", ""))
-                naver.setdefault("dividend_yield", info.get("dividendYield"))
-                naver.setdefault("52w_high", info.get("fiftyTwoWeekHigh"))
-                naver.setdefault("52w_low", info.get("fiftyTwoWeekLow"))
-                naver.setdefault("shares_outstanding", info.get("sharesOutstanding"))
-            except Exception:
-                pass
+            naver.setdefault("sector", config.TICKER_INDUSTRY.get(ticker, ""))
             return naver
 
-    # ── 해외 종목 또는 네이버 실패 → yfinance ─────────────────────────────
+    # ── yfinance 폴백 ──────────────────────────────────────────────────────
+    if not _YF_OK:
+        return {}
     try:
         info = yf.Ticker(ticker).info
         return {
@@ -275,9 +441,27 @@ def get_fundamentals(ticker: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 현재가 조회 (실시간 단순 버전)
+# 현재가 조회 (네이버 실시간 → yfinance 폴백)
 # ---------------------------------------------------------------------------
 def get_current_price(ticker: str) -> Optional[float]:
+    """
+    현재가 조회.
+    1차: 네이버 폴링 API (실시간, 지연 없음)
+    2차: yfinance 폴백
+    """
+    # 한국 종목 → 네이버 실시간
+    if ".KS" in ticker or ".KQ" in ticker:
+        code = ticker.split(".")[0]
+        try:
+            prices = fetch_naver_realtime_prices([code])
+            if code in prices:
+                return float(prices[code]["price"])
+        except Exception as exc:
+            logger.debug("Naver price failed for %s: %s", ticker, exc)
+
+    # yfinance 폴백
+    if not _YF_OK:
+        return None
     try:
         data = yf.Ticker(ticker).fast_info
         price = data.last_price
@@ -654,55 +838,33 @@ def get_foreign_flow(ticker: str, days: int = 10) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 감시 종목 배치 사전 다운로드 (속도 개선)
+# 감시 종목 사전 다운로드 (네이버 병렬 요청 → yfinance 배치 폴백)
 # ---------------------------------------------------------------------------
 def prefetch_all_ohlcv(period: str = "1y", interval: str = "1d") -> None:
     """
-    config.WATCHLIST 전체 종목을 단일 배치 요청으로 다운로드하여 캐시를 채운다.
-    개별 get_ohlcv() 20회 호출 → 1회 배치 요청으로 대체, 속도 대폭 개선.
+    config.WATCHLIST 전체 종목 OHLCV를 병렬 네이버 요청으로 캐시에 채운다.
     이미 캐시가 유효한 종목은 건너뛴다.
     """
-    tickers = config.WATCHLIST
-
-    # 캐시 미만료 종목은 스킵
     tickers_to_fetch = [
-        t for t in tickers if not _is_cache_valid(f"{t}_{period}_{interval}")
+        t for t in config.WATCHLIST
+        if not _is_cache_valid(f"{t}_{period}_{interval}")
     ]
     if not tickers_to_fetch:
         return
 
-    try:
-        raw = yf.download(
-            tickers_to_fetch,
-            period=period,
-            interval=interval,
-            progress=False,
-            auto_adjust=True,
-            group_by="ticker",
-        )
-        if raw is None or raw.empty:
-            return
+    def _fetch_one(ticker: str) -> None:
+        try:
+            get_ohlcv(ticker, period=period, interval=interval)
+        except Exception as exc:
+            logger.warning("prefetch failed for %s: %s", ticker, exc)
 
-        for ticker in tickers_to_fetch:
-            cache_key = f"{ticker}_{period}_{interval}"
-            try:
-                if len(tickers_to_fetch) == 1:
-                    df_t = raw.copy()
-                else:
-                    df_t = raw[ticker].copy()
+    # 최대 8개 동시 요청 (네이버 서버 부하 방지)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_fetch_one, t): t for t in tickers_to_fetch}
+        for fut in as_completed(futures):
+            pass  # 에러는 _fetch_one 내부에서 로깅
 
-                if isinstance(df_t.columns, pd.MultiIndex):
-                    df_t.columns = df_t.columns.get_level_values(0)
-
-                df_t = df_t[["Open", "High", "Low", "Close", "Volume"]].dropna()
-                if not df_t.empty and len(df_t) >= config.TECH.ma_long:
-                    df_t = _add_indicators(df_t)
-                    _set_cache(cache_key, df_t)
-            except Exception as exc:
-                logger.warning("Batch prefetch failed for %s: %s", ticker, exc)
-
-    except Exception as exc:
-        logger.error("Batch OHLCV download failed: %s", exc)
+    logger.info("prefetch_all_ohlcv: %d tickers fetched", len(tickers_to_fetch))
 
 
 # ---------------------------------------------------------------------------

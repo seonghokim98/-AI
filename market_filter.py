@@ -99,10 +99,22 @@ def _check_index_trend(ticker: str, ma_period: int) -> bool:
 
 def _check_vix(threshold: float) -> bool:
     """
-    VIX 지수가 임계값 미만이면 True (공포 없음 = 시장 양호).
-    한국 시장은 VKOSPI가 적합하나 yfinance 미지원,
-    ^VIX(미국 VIX)를 대리 지표로 사용.
+    VIX 현재 수준 확인.
+    1차: 네이버 폴링 API (실시간, 지연 없음)
+    2차: get_index_data (캐시 또는 yfinance 폴백)
     """
+    # 1차: 네이버 폴링 API 실시간 조회
+    try:
+        prices = dp.fetch_naver_realtime_indices(["^VIX"])
+        if prices and "^VIX" in prices:
+            vix = float(prices["^VIX"]["price"])
+            ok = vix < threshold
+            logger.debug("VIX (Naver polling)=%.2f threshold=%.1f ok=%s", vix, threshold, ok)
+            return ok
+    except Exception as exc:
+        logger.debug("Naver VIX polling failed: %s", exc)
+
+    # 2차: 캐시/yfinance 폴백
     df = dp.get_index_data("^VIX", period="1mo")
     if df is None or df.empty:
         logger.warning("VIX data unavailable; treating as OK")
@@ -110,26 +122,18 @@ def _check_vix(threshold: float) -> bool:
 
     last_vix = float(df["Close"].iloc[-1])
     ok = last_vix < threshold
-    logger.debug("VIX=%.2f threshold=%.1f ok=%s", last_vix, threshold, ok)
+    logger.debug("VIX (fallback)=%.2f threshold=%.1f ok=%s", last_vix, threshold, ok)
     return ok
 
 
 def _check_foreign_net_buy(required_streak: int) -> int:
     """
     외국인 순매수 연속일 수 반환.
-    KIS API 미연동 시 0 반환 (차단 요소가 아닌 보너스 조건으로 처리).
+    시장 전체(KOSPI) 외인 수급은 KIS API 연동 전까지 0 반환.
+    개별 종목 수준 외인 수급은 data_provider.get_foreign_flow() 에서 처리.
     """
-    net_buys = dp.get_foreign_net_buy("^KS11", days=required_streak + 2)
-    if net_buys is None:
-        return 0
-
-    streak = 0
-    for val in reversed(net_buys):
-        if val > 0:
-            streak += 1
-        else:
-            break
-    return streak
+    # KIS API 미연동 → 보너스 조건 비활성 (차단 요소 아님)
+    return 0
 
 
 def _build_detail(kospi_ok: bool, kosdaq_ok: bool, vix_ok: bool, streak: int) -> str:
