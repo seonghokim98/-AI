@@ -159,7 +159,7 @@ def load_naver_market_news() -> dict:
     return result
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def load_watchlist_signals() -> list:
     """
     [알고리즘] 감시 종목 3단계 파이프라인:
@@ -167,6 +167,9 @@ def load_watchlist_signals() -> list:
     2단계: 추격매수 차단 (RSI>80 or 이격도>15%)
     3단계: 4대 패턴 + Find_Pullback_Entry → 타점 포착
     """
+    # 배치 다운로드로 개별 20회 → 1회 요청으로 속도 개선
+    dp.prefetch_all_ohlcv()
+
     results = []
     for ticker in config.WATCHLIST:
         name   = config.TICKER_NAME.get(ticker, ticker)
@@ -411,7 +414,6 @@ with st.sidebar:
 **절대 방어** (체결 즉시)
 - 손절 **-{abs(config.STOP_LOSS_RATE)*100:.0f}%** (예외 없음)
 - 최소 손익비 **{config.MIN_REWARD_RISK_RATIO:.1f}:1**
-- 예산 **{config.BUDGET_PER_TRADE:,}원**/종목
 """)
 
     st.markdown("---")

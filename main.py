@@ -264,7 +264,6 @@ def main() -> None:
 
     logger.info("=" * 60)
     logger.info("주식 매매 신호 시스템 시작")
-    logger.info("예산: %d원 / 종목당 %d원", config.TOTAL_BUDGET, config.BUDGET_PER_TRADE)
     logger.info("손절: %.0f%% | 최소 손익비: %.1f:1",
                 config.STOP_LOSS_RATE * 100, config.MIN_REWARD_RISK_RATIO)
     logger.info("감시 종목: %d개", len(config.WATCHLIST))

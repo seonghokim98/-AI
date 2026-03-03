@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # 캐시 유효 시간 (초) - 동일 종목 반복 호출 방지
 # ---------------------------------------------------------------------------
 _CACHE: dict = {}
-_CACHE_TTL_SECONDS: int = 60
+_CACHE_TTL_SECONDS: int = 300  # 5분 (자동새로고침 주기와 맞춤)
 
 
 def _is_cache_valid(key: str) -> bool:
@@ -222,6 +222,58 @@ def get_foreign_net_buy(ticker: str, days: int = 5) -> Optional[list]:
     # TODO: KIS REST API 연동
     # endpoint = "https://openapi.koreainvestment.com:9443/..."
     return None
+
+
+# ---------------------------------------------------------------------------
+# 감시 종목 배치 사전 다운로드 (속도 개선)
+# ---------------------------------------------------------------------------
+def prefetch_all_ohlcv(period: str = "1y", interval: str = "1d") -> None:
+    """
+    config.WATCHLIST 전체 종목을 단일 배치 요청으로 다운로드하여 캐시를 채운다.
+    개별 get_ohlcv() 20회 호출 → 1회 배치 요청으로 대체, 속도 대폭 개선.
+    이미 캐시가 유효한 종목은 건너뛴다.
+    """
+    tickers = config.WATCHLIST
+
+    # 캐시 미만료 종목은 스킵
+    tickers_to_fetch = [
+        t for t in tickers if not _is_cache_valid(f"{t}_{period}_{interval}")
+    ]
+    if not tickers_to_fetch:
+        return
+
+    try:
+        raw = yf.download(
+            tickers_to_fetch,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=True,
+            group_by="ticker",
+        )
+        if raw is None or raw.empty:
+            return
+
+        for ticker in tickers_to_fetch:
+            cache_key = f"{ticker}_{period}_{interval}"
+            try:
+                if len(tickers_to_fetch) == 1:
+                    df_t = raw.copy()
+                else:
+                    df_t = raw[ticker].copy()
+
+                if isinstance(df_t.columns, pd.MultiIndex):
+                    df_t.columns = df_t.columns.get_level_values(0)
+
+                df_t = df_t[["Open", "High", "Low", "Close", "Volume"]].dropna()
+                if not df_t.empty and len(df_t) >= config.TECH.ma_long:
+                    df_t = _add_indicators(df_t)
+                    _set_cache(cache_key, df_t)
+            except Exception as exc:
+                logger.warning("Batch prefetch failed for %s: %s", ticker, exc)
+
+    except Exception as exc:
+        logger.error("Batch OHLCV download failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
