@@ -719,10 +719,12 @@ with col_btn:
         st.rerun()
 
 _market_open = _is_korean_market_open()
-_rt_status   = "🟢 장중 실시간" if _market_open else "🔴 장외 (전일 종가)"
-st.caption(
-    f"마지막 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-    f"지수·종목: 네이버 금융 폴링 API ({_rt_status}) | 패턴분석: yfinance"
+_now_str     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+_src_badge   = "🟢 **장중 실시간** (네이버 증권)" if _market_open else "🔴 **장외** (전일 종가 기준)"
+st.markdown(
+    f"<small>⏱ {_now_str} &nbsp;|&nbsp; 시세 · 지수: {_src_badge} &nbsp;|&nbsp; "
+    f"OHLCV: 네이버 모바일 API &nbsp;|&nbsp; 외인 수급: 네이버 금융 frgn.naver</small>",
+    unsafe_allow_html=True,
 )
 
 # ─── 시장 현황 ────────────────────────────────────────────────────────────────
@@ -734,23 +736,31 @@ with st.spinner("시장 데이터 분석 중..."):
 regime       = market["regime"]
 regime_emoji = {"강세장": "🟢", "중립": "🟡", "약세장": "🔴"}.get(regime, "⚪")
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 with m1: st.metric("시장 상태", f"{regime_emoji} {regime}")
 with m2: st.metric("코스피 20일선", "✅ MA 위" if market["kospi_above_ma"] else "❌ MA 아래")
 with m3: st.metric("코스닥 20일선", "✅ MA 위" if market["kosdaq_above_ma"] else "❌ MA 아래")
 with m4: st.metric("VIX", "✅ 정상" if market["vix_ok"] else "⚠️ 과열")
+with m5:
+    _fbs = market.get("foreign_buy_streak") or 0
+    if _fbs > 0:
+        st.metric("외인 수급 (시장)", f"✅ {_fbs}일 연속 순매수")
+    else:
+        st.metric("외인 수급 (시장)", "🔗 KIS 미연동", help="개별 종목 외인수급은 아래 테이블·카드에서 네이버 금융 기준으로 확인")
 
 if regime == "약세장":
-    st.error("⚠️ 약세장 — 모든 매수 신호 차단 중. 관망하세요.")
+    st.error("⚠️ **약세장** — 모든 매수 신호 차단 중. 현금 비중 최대, 관망하세요.")
 elif regime == "중립":
-    st.warning("🟡 중립장 — 고품질 신호(신뢰도 높은 것)만 참고하세요.")
+    st.warning("🟡 **중립장** — 고품질 신호(신뢰도 80%↑ + 외인 매수)만 선별 참고하세요.")
 else:
-    st.success("🟢 강세장 — 매수 신호 정상 작동 중.")
+    st.success("🟢 **강세장** — 매수 신호 정상 작동 중. 외인 수급 확인 후 진입하세요.")
 
 with st.expander("시장 상세 보기"):
     st.caption(market["detail"])
-    st.caption("외국인 수급: KIS API 미연동" if not market["foreign_buy_streak"]
-               else f"외국인 {market['foreign_buy_streak']}일 연속 순매수")
+    if _fbs:
+        st.caption(f"외국인 {_fbs}일 연속 순매수 (시장 전체 기준, KIS API)")
+    else:
+        st.caption("외국인 시장 수급: KIS API 미연동 | 개별 종목 외인 수급은 네이버 금융 frgn.naver 기준")
 
 st.divider()
 
@@ -871,63 +881,110 @@ buy_signals     = [s for s in signals if s.get("신호유형") == "BUY"]
 sell_signals    = [s for s in signals if s.get("신호유형") == "SELL"]
 blocked_signals = [s for s in signals if s.get("과매수상태") == "WAIT"]
 
+# 외인 수급 기준으로 매수 신호 분류
+frgn_ok_buys      = [s for s in buy_signals if s.get("외인신호") != "WEAK_SIGNAL"]  # 확인 + UNKNOWN
+frgn_blocked_buys = [s for s in buy_signals if s.get("외인신호") == "WEAK_SIGNAL"]  # 외인 매도 차단
+
 # ─── 매수 타점 알림 ────────────────────────────────────────────────────────────
 
 st.subheader("🎯 매수 타점 포착 알림")
 st.caption(
-    "4대 패턴 Setup + Find_Pullback_Entry (MA20 ±2% & 거래량 50%↓ & 도지) 동시 충족 종목"
+    "4대 패턴 Setup + Find_Pullback_Entry (MA20 ±2% & 거래량 50%↓ & 도지) 동시 충족 | "
+    "✅ 외인 매수 확인 종목만 표시 (⛔ 외인 매도 종목은 '외인 차단 대기' 항목 참고)"
 )
 
-if buy_signals:
-    for s in buy_signals:
-        conf    = s.get("신뢰도") or 0
-        filled  = round(conf * 5)
-        bar     = "⬛" * filled + "⬜" * (5 - filled)
-        chg     = s["전일대비"]
-        chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
 
-        with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns([2, 2, 1.5, 1.5, 2])
-            with c1:
-                st.markdown(f"### {s['종목명']}")
-                st.caption(f"`{s['티커']}` | {s.get('시장','')} | {s.get('패턴', '-')}")
-                pool_badge = "✅ 관심 풀 편입" if s.get("풀편입") else "⚠️ 풀 미편입"
-                st.caption(pool_badge)
-            with c2:
-                price = s.get("진입가")
-                st.metric("지정가 (MA20)", f"{price:,.0f}원" if price else "-")
-                reason = s.get("진입근거")
-                if reason:
-                    st.caption(f"📌 {reason}")
-            with c3:
-                st.metric("전일대비", chg_str)
-                rsi_v = s.get("RSI")
-                st.metric("RSI", f"{rsi_v:.1f}" if rsi_v else "-")
-            with c4:
-                disp_v = s.get("이격도")
-                st.metric("MA20 이격도", f"{disp_v:.1f}%" if disp_v is not None else "-")
-                st.metric("신뢰도", f"{bar} {conf*100:.0f}%")
-            with c5:
-                stop = s.get("스탑로스가")
-                t1   = s.get("목표가1R")
-                rr   = s.get("손익비")
-                st.metric("손절가 (-10%)", f"{stop:,.0f}원" if stop else "-")
-                st.metric("1차 목표", f"{t1:,.0f}원" if t1 else "-")
-                if rr:
-                    st.caption(f"손익비 {rr:.1f}:1")
+def _render_buy_card(s: dict) -> None:
+    """매수 신호 카드 1개 렌더링. 외인 수급 신호 포함."""
+    conf    = s.get("신뢰도") or 0
+    filled  = round(conf * 5)
+    bar     = "⬛" * filled + "⬜" * (5 - filled)
+    chg     = s["전일대비"]
+    chg_str = f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%" if chg is not None else "-"
 
-            per_str = (f"PER {s['PER']:.1f}{'✅' if s.get('PER_OK') else '❌'}"
-                       if s.get("PER") and s["PER"] > 0 else "PER N/A")
-            pbr_str = (f"PBR {s['PBR']:.2f}{'✅' if s.get('PBR_OK') else '❌'}"
-                       if s.get("PBR") and s["PBR"] > 0 else "PBR N/A")
-            mom_str = "모멘텀✅" if s.get("모멘텀") else ""
-            st.caption(f"📊 {per_str} | {pbr_str}" + (f" | {mom_str}" if mom_str else ""))
-            st.success(s.get("행동지침") or "📈 MA20 지정가 매수 검토")
-else:
+    frgn_signal = s.get("외인신호", "UNKNOWN")
+    frgn_label  = s.get("외인수급", "➖ 데이터없음")
+    frgn_nb     = s.get("외인5일순매수")
+    frgn_trend  = s.get("외인지분율추세", "-")
+    frgn_ratio  = s.get("외인지분율")
+
+    # 외인 수급 색상: STRONG_BUY_SIGNAL=green / WEAK_SIGNAL=red / UNKNOWN=gray
+    frgn_color = {"STRONG_BUY_SIGNAL": "#26a69a", "WEAK_SIGNAL": "#ef5350"}.get(frgn_signal, "#888")
+    frgn_bg    = {"STRONG_BUY_SIGNAL": "rgba(38,166,154,0.12)", "WEAK_SIGNAL": "rgba(239,83,80,0.12)"}.get(frgn_signal, "rgba(128,128,128,0.08)")
+
+    with st.container(border=True):
+        c1, c2, c3, c4, c5 = st.columns([2, 2, 1.5, 1.5, 2])
+        with c1:
+            st.markdown(f"### {s['종목명']}")
+            st.caption(f"`{s['티커']}` | {s.get('시장','')} | {s.get('패턴', '-')}")
+            pool_badge = "✅ 관심 풀 편입" if s.get("풀편입") else "⚠️ 풀 미편입"
+            st.caption(pool_badge)
+        with c2:
+            price = s.get("진입가")
+            st.metric("지정가 (MA20)", f"{price:,.0f}원" if price else "-")
+            reason = s.get("진입근거")
+            if reason:
+                st.caption(f"📌 {reason}")
+        with c3:
+            st.metric("전일대비", chg_str)
+            rsi_v = s.get("RSI")
+            st.metric("RSI", f"{rsi_v:.1f}" if rsi_v else "-")
+        with c4:
+            disp_v = s.get("이격도")
+            st.metric("MA20 이격도", f"{disp_v:.1f}%" if disp_v is not None else "-")
+            st.metric("신뢰도", f"{bar} {conf*100:.0f}%")
+        with c5:
+            stop = s.get("스탑로스가")
+            t1   = s.get("목표가1R")
+            rr   = s.get("손익비")
+            st.metric("손절가 (-10%)", f"{stop:,.0f}원" if stop else "-")
+            st.metric("1차 목표", f"{t1:,.0f}원" if t1 else "-")
+            if rr:
+                st.caption(f"손익비 {rr:.1f}:1")
+
+        # 외인 수급 정보 행
+        nb_str    = f"{frgn_nb:+,.0f}주" if frgn_nb is not None else "N/A"
+        ratio_str = f"{frgn_ratio:.2f}%" if frgn_ratio is not None else "N/A"
+        st.markdown(
+            f"<div style='background:{frgn_bg};border-left:3px solid {frgn_color};"
+            f"padding:6px 12px;border-radius:4px;margin:4px 0;font-size:0.85em;'>"
+            f"<b>외인 수급</b> &nbsp;{frgn_label} &nbsp;|&nbsp; "
+            f"5일 순매수: <b>{nb_str}</b> &nbsp;|&nbsp; "
+            f"지분율 추세: <b>{frgn_trend}</b> &nbsp;|&nbsp; "
+            f"현재 지분율: <b>{ratio_str}</b>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        per_str = (f"PER {s['PER']:.1f}{'✅' if s.get('PER_OK') else '❌'}"
+                   if s.get("PER") and s["PER"] > 0 else "PER N/A")
+        pbr_str = (f"PBR {s['PBR']:.2f}{'✅' if s.get('PBR_OK') else '❌'}"
+                   if s.get("PBR") and s["PBR"] > 0 else "PBR N/A")
+        mom_str = "모멘텀✅" if s.get("모멘텀") else ""
+        st.caption(f"📊 {per_str} | {pbr_str}" + (f" | {mom_str}" if mom_str else ""))
+        st.success(s.get("행동지침") or "📈 MA20 지정가 매수 검토")
+
+
+if frgn_ok_buys:
+    for s in frgn_ok_buys:
+        _render_buy_card(s)
+elif not frgn_blocked_buys:
     st.info(
         "현재 타점 포착 종목 없음 — "
         "패턴 Setup과 눌림목 3조건(MA20±2% + 거래량50%↓ + 도지) 동시 충족 대기 중."
     )
+else:
+    st.info("✅ 외인 수급 확인 종목 없음 — 아래 '외인 차단 대기' 종목 참고")
+
+# 외인 매도 — 기다려! 섹션
+if frgn_blocked_buys:
+    with st.expander(
+        f"⛔ 외인 차단 대기 {len(frgn_blocked_buys)}개 — 차트는 좋으나 외인이 팔고 있음 (기다려!)",
+        expanded=False,
+    ):
+        st.caption("외인 5일 순매수 < 0 or 지분율 추세 DOWN → 매수 신호 억제. 외인이 돌아올 때까지 관망.")
+        for s in frgn_blocked_buys:
+            _render_buy_card(s)
 
 if blocked_signals:
     with st.expander(f"🚫 추격매수 차단 {len(blocked_signals)}개 (RSI>80 or 이격도>15%)"):
@@ -1045,16 +1102,22 @@ st.divider()
 
 st.subheader("📋 감시 종목 현황")
 
-buy_count     = len(buy_signals)
-sell_count    = len(sell_signals)
-pool_count    = sum(1 for s in signals if s.get("풀편입"))
-blocked_count = len(blocked_signals)
+buy_count          = len(buy_signals)
+sell_count         = len(sell_signals)
+pool_count         = sum(1 for s in signals if s.get("풀편입"))
+blocked_count      = len(blocked_signals)
+frgn_blocked_count = len(frgn_blocked_buys)
 
-col_b, col_s, col_p, col_w = st.columns(4)
-with col_b: st.metric("🎯 타점 포착", f"{buy_count}개")
-with col_s: st.metric("📉 매도 경고", f"{sell_count}개")
-with col_p: st.metric("🔍 관심 종목 풀", f"{pool_count}개")
-with col_w: st.metric("🚫 과매수 차단", f"{blocked_count}개")
+col_b, col_s, col_p, col_w, col_fb = st.columns(5)
+with col_b:  st.metric("🎯 타점 포착",     f"{buy_count}개",
+                        help="외인 수급 무관 전체 BUY 패턴 수")
+with col_s:  st.metric("📉 매도 경고",     f"{sell_count}개")
+with col_p:  st.metric("🔍 관심 종목 풀",  f"{pool_count}개",
+                        help="PBR<1.0 AND PER<15 AND EPS>0 기준 편입 종목")
+with col_w:  st.metric("🚫 과매수 차단",   f"{blocked_count}개",
+                        help="RSI>80 or MA20 이격도>15%")
+with col_fb: st.metric("⛔ 외인 차단 대기", f"{frgn_blocked_count}개",
+                        help="차트 패턴 OK이나 외인 5일 순매수<0 or 지분율 추세 DOWN")
 
 
 def _build_rows(source: list) -> list:
@@ -1200,6 +1263,29 @@ if selected_signal.get("패턴") and selected_signal["패턴"] != "-":
     sell_p = selected_signal.get("_sell_pattern")
     if buy_p and sell_p:
         st.warning(f"⚡ 충돌 감지 — 매도({sell_p.pattern.value}) vs 매수({buy_p.pattern.value}) → 관망 권장")
+
+    # 외인 수급 정보 패널
+    _frgn_sig   = selected_signal.get("외인신호", "UNKNOWN")
+    _frgn_lbl   = selected_signal.get("외인수급", "➖ 데이터없음")
+    _frgn_nb    = selected_signal.get("외인5일순매수")
+    _frgn_trend = selected_signal.get("외인지분율추세", "-")
+    _frgn_ratio = selected_signal.get("외인지분율")
+    _frgn_color = {"STRONG_BUY_SIGNAL": "#26a69a", "WEAK_SIGNAL": "#ef5350"}.get(_frgn_sig, "#888")
+    _frgn_bg    = {"STRONG_BUY_SIGNAL": "rgba(38,166,154,0.12)", "WEAK_SIGNAL": "rgba(239,83,80,0.12)"}.get(_frgn_sig, "rgba(128,128,128,0.08)")
+    _nb_str     = f"{_frgn_nb:+,.0f}주" if _frgn_nb is not None else "N/A"
+    _ratio_str  = f"{_frgn_ratio:.2f}%" if _frgn_ratio is not None else "N/A"
+    st.markdown(
+        f"<div style='background:{_frgn_bg};border-left:3px solid {_frgn_color};"
+        f"padding:8px 14px;border-radius:4px;margin:6px 0;font-size:0.9em;'>"
+        f"<b>외인 수급 (네이버 frgn.naver)</b> &nbsp; {_frgn_lbl} &nbsp;|&nbsp; "
+        f"5일 순매수: <b>{_nb_str}</b> &nbsp;|&nbsp; "
+        f"지분율 추세: <b>{_frgn_trend}</b> &nbsp;|&nbsp; "
+        f"현재 지분율: <b>{_ratio_str}</b>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    if _frgn_sig == "WEAK_SIGNAL":
+        st.warning("⛔ **외인 매도 중** — 차트가 좋아도 외인이 팔고 있는 동안은 기다려! 외인 수급 전환 후 진입 검토.")
 
 with st.spinner("차트 로딩 중..."):
     df_chart = load_ohlcv(selected_ticker, period=chart_period)
