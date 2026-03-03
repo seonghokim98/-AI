@@ -497,22 +497,160 @@ def fetch_naver_realtime_prices(kr_codes: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 외국인 순매수 데이터 (yfinance 미지원 → KIS API 스텁)
+# 외국인 수급 데이터 — 네이버 금융 스크래핑
 # ---------------------------------------------------------------------------
-def get_foreign_net_buy(ticker: str, days: int = 5) -> Optional[list]:
-    """
-    외국인 일별 순매수 금액 리스트 반환 (최근 days일).
-    yfinance에서는 제공하지 않으므로 한국투자증권 API 연동 필요.
-    현재는 스텁(Stub)으로 None 반환.
-    KIS API 연동 후 실제 데이터로 교체할 것.
-    """
-    if not config.KIS_APP_KEY:
-        logger.debug("KIS API key not set; foreign net buy skipped")
+_FOREIGN_CACHE: dict = {}
+_FOREIGN_CACHE_TTL: int = 600  # 10분 (외인 데이터는 변동 느림)
+
+
+def _parse_frgn_num(td) -> Optional[float]:
+    """외국인 순매수량 td → float (+ = 매수, - = 매도, 0 = 보합)"""
+    text = td.get_text(strip=True).replace(",", "").replace("+", "")
+    if not text or text == "-":
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
         return None
 
-    # TODO: KIS REST API 연동
-    # endpoint = "https://openapi.koreainvestment.com:9443/..."
-    return None
+
+def _parse_frgn_ratio(td) -> Optional[float]:
+    """외국인 지분율 td → float (유효 범위 0~100)"""
+    text = td.get_text(strip=True).replace(",", "").replace("%", "")
+    if not text or text == "-":
+        return None
+    try:
+        v = float(text)
+        return v if 0 < v < 100 else None
+    except ValueError:
+        return None
+
+
+def get_foreign_flow(ticker: str, days: int = 10) -> dict:
+    """
+    [알고리즘] Check_Foreigner_Flow 구현 — 외국인 순매수 + 지분율 추세 조회.
+
+    네이버 금융 외국인 현황 페이지(frgn.naver)에서 스크래핑.
+    한국 종목(.KS/.KQ)만 지원. ETF·해외 종목은 UNKNOWN 반환.
+
+    Returns:
+        {
+            'net_buy_5d':       float,  # 5일 누적 순매수량 (+ = 매수, - = 매도)
+            'ownership_trend':  str,    # 'UP' | 'DOWN' | 'FLAT'
+            'ownership_ratio':  float,  # 최신 지분율 (%)
+            'signal':           str,    # 'STRONG_BUY_SIGNAL' | 'WEAK_SIGNAL' | 'UNKNOWN'
+        }
+    """
+    # ETF 및 해외 종목은 외인 수급 분석 제외
+    if ".KS" not in ticker and ".KQ" not in ticker:
+        return {"signal": "UNKNOWN"}
+    if config.TICKER_MARKET.get(ticker, "") == "ETF":
+        return {"signal": "UNKNOWN"}
+    if not _BS4_OK:
+        return {"signal": "UNKNOWN"}
+
+    code = ticker.split(".")[0]
+    cache_key = f"frgn_{code}"
+
+    # 캐시 확인
+    if cache_key in _FOREIGN_CACHE:
+        cached_at, cached_data = _FOREIGN_CACHE[cache_key]
+        if (datetime.now() - cached_at).seconds < _FOREIGN_CACHE_TTL:
+            return cached_data
+
+    try:
+        import re
+        date_re = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+
+        url = f"https://finance.naver.com/item/frgn.naver?code={code}"
+        resp = requests.get(url, headers=_NAVER_FIN_HEADERS, timeout=10)
+        resp.encoding = "euc-kr"
+        soup = _BS(resp.text, "html.parser")
+
+        table = soup.select_one("table.type2")
+        if table is None:
+            logger.warning("Foreign flow table not found for %s", ticker)
+            return {"signal": "UNKNOWN"}
+
+        net_buys: list = []
+        ownership_ratios: list = []
+
+        for row in table.select("tr"):
+            tds = row.select("td")
+            if len(tds) < 5:
+                continue
+
+            date_text = tds[0].get_text(strip=True)
+            if not date_re.match(date_text):
+                continue
+
+            # 외국인 순매수량: td[3] 우선, 실패 시 td[2] 시도
+            nb = _parse_frgn_num(tds[3])
+            if nb is None:
+                nb = _parse_frgn_num(tds[2])
+            net_buys.append(nb if nb is not None else 0.0)
+
+            # 외국인 지분율: 뒤에서부터 0~100 범위 값 탐색
+            ratio = None
+            for idx in (5, 6, -1, -2, -3):
+                try:
+                    v = _parse_frgn_ratio(tds[idx])
+                    if v is not None:
+                        ratio = v
+                        break
+                except IndexError:
+                    continue
+            if ratio is not None:
+                ownership_ratios.append(ratio)
+
+            if len(net_buys) >= days:
+                break
+
+        if not net_buys:
+            logger.warning("No foreign flow data parsed for %s", ticker)
+            return {"signal": "UNKNOWN"}
+
+        # [알고리즘] Foreign_Net_Buy_5D — 최근 5일 누적 순매수
+        net_buy_5d = sum(net_buys[:5])
+
+        # [알고리즘] Foreign_Ownership_Trend — 10일 지분율 추세
+        ownership_trend = "FLAT"
+        if len(ownership_ratios) >= 6:
+            recent = sum(ownership_ratios[:5]) / 5
+            older_slice = ownership_ratios[5:min(10, len(ownership_ratios))]
+            older = sum(older_slice) / len(older_slice)
+            if recent > older + 0.1:
+                ownership_trend = "UP"
+            elif recent < older - 0.1:
+                ownership_trend = "DOWN"
+        elif len(ownership_ratios) >= 2:
+            if ownership_ratios[0] > ownership_ratios[-1] + 0.1:
+                ownership_trend = "UP"
+            elif ownership_ratios[0] < ownership_ratios[-1] - 0.1:
+                ownership_trend = "DOWN"
+
+        # [알고리즘] Check_Foreigner_Flow 신호 결정
+        if net_buy_5d > 0 and ownership_trend == "UP":
+            signal = "STRONG_BUY_SIGNAL"
+        else:
+            signal = "WEAK_SIGNAL"
+
+        result = {
+            "net_buy_5d":      net_buy_5d,
+            "ownership_trend": ownership_trend,
+            "ownership_ratio": ownership_ratios[0] if ownership_ratios else None,
+            "signal":          signal,
+        }
+        _FOREIGN_CACHE[cache_key] = (datetime.now(), result)
+        logger.info(
+            "Foreign flow [%s]: 5D_NB=%+.0f trend=%s → %s",
+            ticker, net_buy_5d, ownership_trend, signal,
+        )
+        return result
+
+    except Exception as exc:
+        logger.warning("Foreign flow fetch failed for %s: %s", ticker, exc)
+        return {"signal": "UNKNOWN"}
 
 
 # ---------------------------------------------------------------------------

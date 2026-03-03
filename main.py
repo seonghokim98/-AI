@@ -170,10 +170,29 @@ def _process_ticker(ticker: str, df, market: mf.MarketStatus) -> None:
                     name, risk.reward_risk_ratio)
         return
 
+    # ── Step 5.5: 외인 수급 검증 [알고리즘 Check_Foreigner_Flow] ─────────
+    # 외인이 팔고 있다면 아무리 차트가 좋아도 '기다려!'
+    foreigner_flow = dp.get_foreign_flow(ticker)
+    flow_signal = foreigner_flow.get("signal", "UNKNOWN")
+
+    if flow_signal == "WEAK_SIGNAL":
+        nb    = foreigner_flow.get("net_buy_5d", 0)
+        trend = foreigner_flow.get("ownership_trend", "-")
+        logger.info(
+            "%s: 외인 수급 WEAK (5D순매수=%+.0f주, 지분율추세=%s) "
+            "— 차트 OK지만 외인 매도 중 → 기다려!",
+            name, nb, trend,
+        )
+        sb.send_watchlist_signal(ticker, pattern, risk, foreigner_flow=foreigner_flow)
+        return  # 외인 매도 시 매수 신호 차단
+
+    # STRONG_BUY_SIGNAL 또는 UNKNOWN(ETF·데이터없음) → 정상 진행
+
     # ── Step 6: 슬랙 발송 ─────────────────────────────────────────────
     if valuation.passed:
         # 모든 조건 통과 → 정식 매수 신호
-        sent = sb.send_buy_signal(ticker, pattern, valuation, risk, market)
+        sent = sb.send_buy_signal(ticker, pattern, valuation, risk, market,
+                                  foreigner_flow=foreigner_flow)
         if sent:
             _state.daily_signals.append({
                 "ticker": ticker,
@@ -189,7 +208,7 @@ def _process_ticker(ticker: str, df, market: mf.MarketStatus) -> None:
     else:
         # 패턴은 맞으나 밸류에이션 미통과 → 관심 종목 알림
         logger.info("%s: Pattern OK but valuation failed — watchlist alert", name)
-        sb.send_watchlist_signal(ticker, pattern, risk)
+        sb.send_watchlist_signal(ticker, pattern, risk, foreigner_flow=foreigner_flow)
 
 
 # ---------------------------------------------------------------------------

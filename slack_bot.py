@@ -147,12 +147,39 @@ def send_dashboard_sell_alert(signal: dict) -> bool:
 # ---------------------------------------------------------------------------
 # 메인 발송 함수 (main.py 스케줄러용)
 # ---------------------------------------------------------------------------
+def _format_foreigner_section(foreigner_flow: dict) -> str:
+    """외인 수급 슬랙 섹션 문자열 생성"""
+    if not foreigner_flow:
+        return ""
+    signal = foreigner_flow.get("signal", "UNKNOWN")
+    if signal == "UNKNOWN":
+        return "\n*─── 외인 수급 ───*\n• 데이터 없음 (ETF 또는 조회 실패)"
+
+    nb    = foreigner_flow.get("net_buy_5d", 0)
+    trend = foreigner_flow.get("ownership_trend", "FLAT")
+    ratio = foreigner_flow.get("ownership_ratio")
+
+    nb_str    = f"{'+' if nb >= 0 else ''}{nb:,.0f}주"
+    nb_icon   = "📈" if nb > 0 else "📉"
+    trend_icon = {"UP": "⬆️ 우상향", "DOWN": "⬇️ 하락", "FLAT": "➡️ 보합"}.get(trend, trend)
+    ratio_str = f" (지분율 {ratio:.1f}%)" if ratio else ""
+    sig_str   = "✅ STRONG BUY — 외인 주도 매수" if signal == "STRONG_BUY_SIGNAL" else "⚠️ WEAK — 외인 매도 중"
+
+    return (
+        f"\n*─── 외인 수급 [Check_Foreigner_Flow] ───*\n"
+        f"• 5일 순매수: {nb_icon} {nb_str}\n"
+        f"• 지분율 추세: {trend_icon}{ratio_str}\n"
+        f"• 외인 판단: {sig_str}"
+    )
+
+
 def send_buy_signal(
     ticker: str,
     pattern: PatternResult,
     valuation: ValuationResult,
     risk: RiskResult,
     market: MarketStatus,
+    foreigner_flow: dict = None,
 ) -> bool:
     """
     매수 신호 슬랙 알림 발송 (main.py 스케줄러 파이프라인용).
@@ -162,6 +189,7 @@ def send_buy_signal(
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     confidence_bar = _confidence_emoji(pattern.confidence)
+    frgn_section   = _format_foreigner_section(foreigner_flow)
 
     msg = f"""📈 *[매수 신호 발생]* — {now}
 
@@ -176,7 +204,7 @@ def send_buy_signal(
 • 2차 목표가: {risk.target_price_2r:,.0f}원
 
 *─── 밸류에이션 ───*
-{valuation.detail}
+{valuation.detail}{frgn_section}
 
 *─── 시장 상황 ───*
 • 시장 트렌드: *{market.regime.value}*
@@ -243,23 +271,59 @@ def send_watchlist_signal(
     ticker: str,
     pattern: PatternResult,
     risk: RiskResult,
+    foreigner_flow: dict = None,
 ) -> bool:
     """
-    관심 종목 감시 알림 (밸류에이션 미통과 종목 포함, 참고용)
+    관심 종목 감시 알림.
+    - 밸류에이션 미통과 종목 (참고용)
+    - 외인 수급 WEAK으로 매수 신호가 억제된 종목 (기다려! 경고)
     """
     name = config.TICKER_NAME.get(ticker, ticker)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now  = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    msg = f"""👀 *[관심 종목 패턴 감지]* — {now}
+    flow_signal = (foreigner_flow or {}).get("signal", "UNKNOWN")
+    foreigner_blocked = (flow_signal == "WEAK_SIGNAL")
+
+    if foreigner_blocked:
+        # 차트는 좋으나 외인 매도 중 → 기다려! 경고
+        nb    = foreigner_flow.get("net_buy_5d", 0)
+        trend = foreigner_flow.get("ownership_trend", "FLAT")
+        ratio = foreigner_flow.get("ownership_ratio")
+        trend_icon = {"UP": "⬆️", "DOWN": "⬇️", "FLAT": "➡️"}.get(trend, "")
+        ratio_str  = f" | 지분율 {ratio:.1f}%" if ratio else ""
+        nb_str     = f"{'+' if nb >= 0 else ''}{nb:,.0f}주"
+
+        msg = f"""⛔ *[외인 매도 — 기다려!]* — {now}
+
+*종목:* {name} (`{ticker}`)
+*패턴:* {pattern.pattern.value} (신뢰도 {pattern.confidence*100:.0f}%)
+*현재가:* {risk.entry_price:,.0f}원
+
+*─── 외인 수급 경고 [Check_Foreigner_Flow] ───*
+• 5일 순매수: 📉 {nb_str} ← 외인 팔고 있음
+• 지분율 추세: {trend_icon} {trend}{ratio_str}
+• 판단: ⚠️ WEAK — 매수 신호 차단
+
+*─── 차트 패턴 (참고용) ───*
+{pattern.detail}
+
+> 아무리 차트가 좋아도 외인이 팔 때는 *기다려!*
+> 외인 순매수 전환 후 재진입 타점을 노릴 것."""
+    else:
+        # 밸류에이션 미통과 등 일반 관심 종목
+        frgn_section = _format_foreigner_section(foreigner_flow)
+        msg = f"""👀 *[관심 종목 패턴 감지]* — {now}
 
 *종목:* {name} (`{ticker}`)
 *패턴:* {pattern.pattern.value} (신뢰도 {pattern.confidence*100:.0f}%)
 *현재가:* {risk.entry_price:,.0f}원
 *손절가:* {risk.stop_loss_price:,.0f}원
+{frgn_section}
 
 {pattern.detail}
 
 > 밸류에이션 필터 미통과 — 참고만 할 것"""
+
     return _send(msg)
 
 

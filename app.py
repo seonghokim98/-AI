@@ -237,6 +237,21 @@ def load_watchlist_signals() -> list:
             except Exception:
                 pass
 
+        # 외인 수급 검증 [알고리즘 Check_Foreigner_Flow]
+        frgn = dp.get_foreign_flow(ticker)
+        frgn_signal = frgn.get("signal", "UNKNOWN")
+        frgn_nb     = frgn.get("net_buy_5d")
+        frgn_trend  = frgn.get("ownership_trend", "-")
+        frgn_ratio  = frgn.get("ownership_ratio")
+
+        # 외인 수급 아이콘
+        if frgn_signal == "STRONG_BUY_SIGNAL":
+            frgn_label = "✅ 외인 매수"
+        elif frgn_signal == "WEAK_SIGNAL":
+            frgn_label = "⛔ 외인 매도"
+        else:
+            frgn_label = "➖ 데이터없음"
+
         pattern      = sell_pattern if sell_pattern is not None else buy_pattern
         pool_status  = _get_pool_status(val.in_pool, pattern, ob_status)
 
@@ -271,6 +286,11 @@ def load_watchlist_signals() -> list:
             "투입금액":  trade_order.budget_used if trade_order else None,
             "손익비":    trade_order.reward_risk if trade_order else None,
             "풀상태":    pool_status,
+            "외인수급":       frgn_label,
+            "외인5일순매수":  frgn_nb,
+            "외인지분율추세": frgn_trend,
+            "외인지분율":     frgn_ratio,
+            "외인신호":       frgn_signal,
             "_buy_pattern":  buy_pattern,
             "_sell_pattern": sell_pattern,
         })
@@ -290,6 +310,8 @@ def _empty_row(ticker, name, market):
         "스탑로스가": None, "목표가1R": None, "수량": None,
         "투입금액": None, "손익비": None,
         "풀상태": "데이터 없음",
+        "외인수급": "➖ 데이터없음", "외인5일순매수": None,
+        "외인지분율추세": "-", "외인지분율": None, "외인신호": "UNKNOWN",
         "_buy_pattern": None, "_sell_pattern": None,
     }
 
@@ -1059,6 +1081,7 @@ def _build_rows(source: list) -> list:
             "종목명":        s["종목명"],
             "현재가":        price_str,
             "전일대비":      chg_str,
+            "외인수급":      s.get("외인수급", "➖"),
             "밸류에이션":    val_str,
             "풀편입":        "✅" if s.get("풀편입") else "-",
             "추격차단":      ob_str or "-",
