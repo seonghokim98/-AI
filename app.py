@@ -59,29 +59,60 @@ def load_market_status() -> dict:
     }
 
 
-@st.cache_data(ttl=60)
+_INDEX_MAP = {
+    "코스피":     ("^KS11",    ""),
+    "코스닥":     ("^KQ11",    ""),
+    "S&P 500":   ("^GSPC",    "USD"),
+    "나스닥 100": ("^NDX",     "USD"),
+    "닛케이 225": ("^N225",    "JPY"),
+    "항셍":       ("^HSI",     "HKD"),
+    "달러인덱스": ("DX-Y.NYB", ""),
+    "금 선물":    ("GC=F",     "USD"),
+    "WTI 원유":   ("CL=F",     "USD"),
+    "VIX":        ("^VIX",     ""),
+}
+
+
+def _is_korean_market_open() -> bool:
+    """한국 장중 여부 판단 (KST 09:00~15:30, 주말 제외)"""
+    from datetime import timezone, timedelta
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
+    if now.weekday() >= 5:
+        return False
+    open_t  = now.replace(hour=9,  minute=0,  second=0, microsecond=0)
+    close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return open_t <= now <= close_t
+
+
+@st.cache_data(ttl=30)
 def load_market_indices() -> dict:
-    index_map = {
-        "코스피":     ("^KS11",    ""),
-        "코스닥":     ("^KQ11",    ""),
-        "S&P 500":   ("^GSPC",    "USD"),
-        "나스닥 100": ("^NDX",     "USD"),
-        "닛케이 225": ("^N225",    "JPY"),
-        "항셍":       ("^HSI",     "HKD"),
-        "달러인덱스": ("DX-Y.NYB", ""),
-        "금 선물":    ("GC=F",     "USD"),
-        "WTI 원유":   ("CL=F",     "USD"),
-        "VIX":        ("^VIX",     ""),
-    }
+    """지수 데이터 로드 — 네이버 금융 실시간 우선, yfinance 폴백 (TTL 30초)"""
+    all_tickers = [v[0] for v in _INDEX_MAP.values()]
+
+    # 1차: 네이버 금융 실시간 폴링 API
+    naver_rt = dp.fetch_naver_realtime_indices(all_tickers)
+
     result = {}
-    for name, (ticker, unit) in index_map.items():
+    for name, (ticker, unit) in _INDEX_MAP.items():
+        if ticker in naver_rt:
+            d = naver_rt[ticker]
+            result[name] = {
+                "price":  d["price"],
+                "change": d["change_pct"],
+                "unit":   unit,
+                "rt":     True,
+            }
+            continue
+
+        # 2차: yfinance 폴백
         try:
             df = dp.get_index_data(ticker, period="5d")
             if df is not None and len(df) >= 2:
                 cur  = float(df["Close"].iloc[-1])
                 prev = float(df["Close"].iloc[-2])
                 chg  = (cur - prev) / prev * 100
-                result[name] = {"price": cur, "change": chg, "unit": unit}
+                result[name] = {"price": cur, "change": chg, "unit": unit, "rt": False}
         except Exception:
             pass
     return result
@@ -280,6 +311,23 @@ def _get_pool_status(in_pool: bool, pattern, ob_status: str) -> str:
 @st.cache_data(ttl=300)
 def load_ohlcv(ticker: str, period: str = "6mo"):
     return dp.get_ohlcv(ticker, period=period)
+
+
+@st.cache_data(ttl=30)
+def load_realtime_prices() -> dict:
+    """
+    감시 종목 한국 주식 실시간 현재가 (네이버 금융 폴링 API, TTL 30초).
+    장중: 실시간 / 장외: 전일 종가 기준
+    Returns: {ticker: {"price": float, "change_pct": float}}
+    """
+    code_to_ticker = {}
+    for ticker in config.WATCHLIST:
+        if ".KS" in ticker or ".KQ" in ticker:
+            code = ticker.split(".")[0]
+            code_to_ticker[code] = ticker
+
+    raw = dp.fetch_naver_realtime_prices(list(code_to_ticker.keys()))
+    return {code_to_ticker[code]: data for code, data in raw.items() if code in code_to_ticker}
 
 
 @st.cache_data(ttl=300)
@@ -648,7 +696,12 @@ with col_btn:
         st.cache_data.clear()
         st.rerun()
 
-st.caption(f"마지막 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 데이터: yfinance")
+_market_open = _is_korean_market_open()
+_rt_status   = "🟢 장중 실시간" if _market_open else "🔴 장외 (전일 종가)"
+st.caption(
+    f"마지막 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+    f"지수·종목: 네이버 금융 폴링 API ({_rt_status}) | 패턴분석: yfinance"
+)
 
 # ─── 시장 현황 ────────────────────────────────────────────────────────────────
 
@@ -715,6 +768,19 @@ st.divider()
 
 with st.spinner("감시 종목 스캔 중... (최초 실행 시 1~2분 소요)"):
     signals = load_watchlist_signals()
+
+# ─── 실시간 현재가 반영 (네이버 금융 폴링 API, 30초 TTL) ────────────────────
+_rt_prices = load_realtime_prices()
+if _rt_prices:
+    _updated_signals = []
+    for _s in signals:
+        _rt = _rt_prices.get(_s["티커"])
+        if _rt:
+            _s = dict(_s)
+            _s["현재가"]   = _rt["price"]
+            _s["전일대비"] = _rt["change_pct"]
+        _updated_signals.append(_s)
+    signals = _updated_signals
 
 # ─── 슬랙 자동 알림 ────────────────────────────────────────────────────────
 
@@ -866,9 +932,14 @@ with tab_kr:
         with col:
             if d:
                 chg = d["change"]
-                st.metric(name, f"{d['price']:,.2f}",
-                          f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%",
-                          delta_color="normal" if chg >= 0 else "inverse")
+                rt_badge = " 🟢" if d.get("rt") else " 🔴"
+                st.metric(
+                    name + rt_badge,
+                    f"{d['price']:,.2f}",
+                    f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%",
+                    delta_color="normal" if chg >= 0 else "inverse",
+                    help="🟢 실시간 (네이버 금융 폴링 API)" if d.get("rt") else "🔴 지연 데이터 (yfinance)",
+                )
             else:
                 st.metric(name, "데이터 없음")
     st.markdown("---")
@@ -890,10 +961,14 @@ with tab_us:
         with col:
             if d:
                 chg = d["change"]
+                rt_badge = " 🟢" if d.get("rt") else " 🔴"
                 price_str = f"{d['price']:,.2f}" + (f" {d['unit']}" if d["unit"] else "")
-                st.metric(name, price_str,
-                          f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%",
-                          delta_color="normal" if chg >= 0 else "inverse")
+                st.metric(
+                    name + rt_badge, price_str,
+                    f"{'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%",
+                    delta_color="normal" if chg >= 0 else "inverse",
+                    help="🟢 실시간 (네이버 금융 폴링 API)" if d.get("rt") else "🔴 지연 데이터 (yfinance)",
+                )
             else:
                 st.metric(name, "데이터 없음")
     st.markdown("---")
@@ -919,10 +994,12 @@ with tab_global:
     table_rows = []
     for iname, d in indices.items():
         chg = d["change"]
+        src = "실시간" if d.get("rt") else "지연"
         table_rows.append({
             "지수":    iname,
             "현재가":  f"{d['price']:,.2f}" + (f" {d['unit']}" if d["unit"] else ""),
             "전일대비": f"{'🟢' if chg >= 0 else '🔴'} {'▲' if chg >= 0 else '▼'} {abs(chg):.2f}%",
+            "출처":    src,
         })
     if table_rows:
         st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)

@@ -288,6 +288,132 @@ def get_current_price(ticker: str) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# 네이버 금융 실시간 데이터 — 폴링 API (지연 없는 장중 실시간 시세)
+# ---------------------------------------------------------------------------
+_NAVER_POLLING_URL = "https://polling.finance.naver.com/api/realtime"
+_NAVER_POLLING_HDR = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+    "Referer": "https://finance.naver.com/",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+# yfinance 티커 → 네이버 폴링 API 지수 코드 매핑
+_YF_TO_NAVER_INDEX: dict = {
+    "^KS11":    "KOSPI",
+    "^KQ11":    "KOSDAQ",
+    "^GSPC":    "SNP500",
+    "^NDX":     "NASDAQ",
+    "^N225":    "NIKKEI",
+    "^HSI":     "HSI",
+    "^VIX":     "VIX",
+    "DX-Y.NYB": "DXY",
+}
+
+
+def _parse_polling_item(item: dict) -> Optional[dict]:
+    """네이버 폴링 API 단건 응답 → {"price", "change", "change_pct"} 변환
+    rf 필드: "2"=상승, "5"=하락, "3"=보합
+    """
+    try:
+        price = float(str(item.get("nv", 0)).replace(",", ""))
+        cv    = float(str(item.get("cv", 0)).replace(",", ""))
+        cr    = float(str(item.get("cr", 0)).replace(",", ""))
+        rf    = str(item.get("rf", "3"))
+        if rf == "5":
+            cv, cr = -abs(cv), -abs(cr)
+        elif rf == "2":
+            cv, cr = abs(cv), abs(cr)
+        if price > 0:
+            return {"price": price, "change": cv, "change_pct": cr}
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def fetch_naver_realtime_indices(yf_tickers: list) -> dict:
+    """
+    네이버 금융 폴링 API에서 여러 지수 실시간 데이터를 일괄 조회.
+
+    Args:
+        yf_tickers: yfinance 티커 리스트 (예: ["^KS11", "^KQ11", "^GSPC"])
+    Returns:
+        {yf_ticker: {"price": float, "change": float, "change_pct": float}}
+    """
+    ticker_to_naver = {t: _YF_TO_NAVER_INDEX[t] for t in yf_tickers if t in _YF_TO_NAVER_INDEX}
+    if not ticker_to_naver:
+        return {}
+
+    naver_to_yf = {v: k for k, v in ticker_to_naver.items()}
+    query = ",".join(f"SERVICE_INDEX:{nc}" for nc in ticker_to_naver.values())
+
+    result = {}
+    try:
+        resp = requests.get(
+            _NAVER_POLLING_URL,
+            params={"query": query},
+            headers=_NAVER_POLLING_HDR,
+            timeout=6,
+        )
+        data = resp.json()
+        for area in data.get("result", {}).get("areas", []):
+            for item in area.get("datas", []):
+                nv_cd = item.get("cd", "")
+                yf_tk = naver_to_yf.get(nv_cd)
+                if yf_tk is None:
+                    continue
+                parsed = _parse_polling_item(item)
+                if parsed:
+                    result[yf_tk] = parsed
+    except Exception as exc:
+        logger.warning("Naver polling index API failed: %s", exc)
+    return result
+
+
+def fetch_naver_realtime_prices(kr_codes: list) -> dict:
+    """
+    네이버 금융 폴링 API에서 한국 종목 실시간 시세 일괄 조회.
+
+    Args:
+        kr_codes: 6자리 종목 코드 리스트 (예: ["005930", "000660"])
+    Returns:
+        {code: {"price": float, "change": float, "change_pct": float}}
+    """
+    if not kr_codes:
+        return {}
+
+    BATCH = 20
+    result = {}
+    for i in range(0, len(kr_codes), BATCH):
+        batch = kr_codes[i: i + BATCH]
+        query = ",".join(f"SERVICE_ITEM:{c}" for c in batch)
+        try:
+            resp = requests.get(
+                _NAVER_POLLING_URL,
+                params={"query": query},
+                headers=_NAVER_POLLING_HDR,
+                timeout=8,
+            )
+            data = resp.json()
+            for area in data.get("result", {}).get("areas", []):
+                for item in area.get("datas", []):
+                    code = item.get("cd", "")
+                    if code not in batch:
+                        continue
+                    parsed = _parse_polling_item(item)
+                    if parsed:
+                        result[code] = parsed
+        except Exception as exc:
+            logger.warning("Naver polling stock API failed (batch %d): %s", i, exc)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # 외국인 순매수 데이터 (yfinance 미지원 → KIS API 스텁)
 # ---------------------------------------------------------------------------
 def get_foreign_net_buy(ticker: str, days: int = 5) -> Optional[list]:
