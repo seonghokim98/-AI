@@ -1,0 +1,17 @@
+# 환경변수 (API 키, 웹훅 주소 등 절대 커밋 금지)
+.env
+
+# 파이썬
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# 로그
+*.log
+
+# 에디터
+.idea/
+.vscode/
+*.swp
