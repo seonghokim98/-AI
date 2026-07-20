@@ -1,342 +1,345 @@
-<title>에이스침대 프로모션 아이디어 마인드맵</title>
+<title>에이스침대 프로모션 아이디어 보드</title>
 <style>
   :root {
-    --bg: #f7f8fa;
+    --bg: #f6f7f9;
     --panel: #ffffff;
     --ink: #1a2233;
     --ink-soft: #4d5a72;
     --ink-faint: #8a94a8;
     --accent: #1d4e9e;
+    --accent-ink: #ffffff;
     --accent-soft: #e8eef8;
-    --line: #dde3ec;
-    --tag-new: #0d7a4f;
-    --tag-new-bg: #e4f4ec;
+    --line: #dfe4ec;
+    --leaf-bg: #f2f5fa;
+    --warn: #9a6b1f;
+    --warn-bg: #faf3e3;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #12161f;
-      --panel: #1a202c;
-      --ink: #e8ecf3;
-      --ink-soft: #a8b2c4;
-      --ink-faint: #6b7688;
-      --accent: #6fa0e8;
-      --accent-soft: #22304a;
-      --line: #2c3546;
-      --tag-new: #5cc99a;
-      --tag-new-bg: #1d3a2d;
+      --bg: #12161f; --panel: #1a202c; --ink: #e8ecf3; --ink-soft: #a8b2c4;
+      --ink-faint: #6b7688; --accent: #6fa0e8; --accent-ink: #101724;
+      --accent-soft: #22304a; --line: #2c3546; --leaf-bg: #212a3a;
+      --warn: #d9b36a; --warn-bg: #33290f;
     }
   }
   :root[data-theme="light"] {
-    --bg: #f7f8fa; --panel: #ffffff; --ink: #1a2233; --ink-soft: #4d5a72;
-    --ink-faint: #8a94a8; --accent: #1d4e9e; --accent-soft: #e8eef8;
-    --line: #dde3ec; --tag-new: #0d7a4f; --tag-new-bg: #e4f4ec;
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1a2233; --ink-soft: #4d5a72;
+    --ink-faint: #8a94a8; --accent: #1d4e9e; --accent-ink: #ffffff;
+    --accent-soft: #e8eef8; --line: #dfe4ec; --leaf-bg: #f2f5fa;
+    --warn: #9a6b1f; --warn-bg: #faf3e3;
   }
   :root[data-theme="dark"] {
     --bg: #12161f; --panel: #1a202c; --ink: #e8ecf3; --ink-soft: #a8b2c4;
-    --ink-faint: #6b7688; --accent: #6fa0e8; --accent-soft: #22304a;
-    --line: #2c3546; --tag-new: #5cc99a; --tag-new-bg: #1d3a2d;
+    --ink-faint: #6b7688; --accent: #6fa0e8; --accent-ink: #101724;
+    --accent-soft: #22304a; --line: #2c3546; --leaf-bg: #212a3a;
+    --warn: #d9b36a; --warn-bg: #33290f;
   }
 
+  * { box-sizing: border-box; }
   body {
-    background: var(--bg);
-    color: var(--ink);
+    background: var(--bg); color: var(--ink);
     font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
-    line-height: 1.65;
-    margin: 0;
-    padding: 2.5rem 1.25rem 4rem;
+    line-height: 1.6; margin: 0; padding: 2rem 1.25rem 4rem;
   }
-  .wrap { max-width: 880px; margin: 0 auto; }
+  .wrap { max-width: 780px; margin: 0 auto; }
 
-  header { margin-bottom: 2rem; }
-  .eyebrow {
-    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.14em;
-    text-transform: uppercase; color: var(--accent); margin: 0 0 0.5rem;
-  }
-  h1 {
-    font-size: 1.75rem; font-weight: 800; margin: 0 0 0.4rem;
-    letter-spacing: -0.01em; text-wrap: balance;
-  }
-  .meta { color: var(--ink-faint); font-size: 0.85rem; margin: 0; }
+  header { margin-bottom: 1.5rem; }
+  .eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 .4rem; }
+  h1 { font-size: 1.5rem; font-weight: 800; margin: 0 0 .3rem; letter-spacing: -.01em; text-wrap: balance; }
+  .meta { color: var(--ink-faint); font-size: .82rem; margin: 0; }
 
-  .board {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 1rem; overflow-x: auto; margin-bottom: 2.5rem;
+  /* ── 탭 내비게이션 ── */
+  nav { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  nav button {
+    font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer;
+    color: var(--ink-soft); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: .4rem 1rem; transition: background .15s, color .15s;
   }
-  .board pre.mermaid { margin: 0; min-width: 640px; }
+  nav button:hover { background: var(--accent-soft); color: var(--accent); }
+  nav button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  nav button:focus-visible, .leaf > summary:focus-visible, .branch > summary:focus-visible,
+  .toolbar button:focus-visible, .ov-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  h2 {
-    font-size: 1.15rem; font-weight: 700; margin: 2.2rem 0 0.2rem;
-    display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap;
-  }
-  .idea-no {
-    font-size: 0.72rem; font-weight: 700; color: var(--accent);
-    background: var(--accent-soft); border-radius: 4px;
-    padding: 0.15rem 0.5rem; letter-spacing: 0.08em;
-  }
-  .tag {
-    font-size: 0.72rem; font-weight: 700; border-radius: 4px;
-    padding: 0.15rem 0.5rem; letter-spacing: 0.05em;
-  }
-  .tag.new { color: var(--tag-new); background: var(--tag-new-bg); }
-  .added { color: var(--ink-faint); font-size: 0.8rem; margin: 0 0 1rem; }
+  section[hidden] { display: none; }
 
-  h3 {
-    font-size: 0.95rem; font-weight: 700; color: var(--ink-soft);
-    margin: 1.4rem 0 0.4rem;
+  /* ── 개요 탭 ── */
+  .ov-grid { display: grid; gap: .8rem; }
+  .ov-card {
+    display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem 1.2rem; color: inherit; transition: border-color .15s;
   }
-  p, li { color: var(--ink-soft); font-size: 0.95rem; }
-  ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
-  li { margin-bottom: 0.3rem; }
-  li strong, p strong { color: var(--ink); font-weight: 700; }
+  .ov-card:hover { border-color: var(--accent); }
+  .ov-top { display: flex; align-items: center; gap: .55rem; margin-bottom: .3rem; }
+  .idea-no { font-size: .7rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: .12rem .45rem; letter-spacing: .08em; }
+  .ov-title { font-size: 1rem; font-weight: 700; }
+  .ov-sum { color: var(--ink-soft); font-size: .88rem; margin: 0 0 .55rem; }
+  .chips { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .chip { font-size: .74rem; color: var(--ink-faint); background: var(--leaf-bg); border-radius: 4px; padding: .1rem .5rem; }
+  .synergy {
+    margin-top: 1.2rem; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1rem 1.2rem;
+  }
+  .synergy h3 { margin: 0 0 .5rem; font-size: .85rem; font-weight: 700; color: var(--accent); }
+  .synergy p { margin: 0; color: var(--ink-soft); font-size: .88rem; }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.9rem; margin-top: 0.6rem; }
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; padding: 0.9rem 1.05rem;
-  }
-  .card h4 { margin: 0 0 0.4rem; font-size: 0.85rem; font-weight: 700; color: var(--accent); }
-  .card ul { padding-left: 1.05rem; }
-  .card li { font-size: 0.88rem; margin-bottom: 0.25rem; }
+  /* ── 아이디어 상세 탭 ── */
+  .idea-head { margin-bottom: 1rem; }
+  .idea-head h2 { font-size: 1.15rem; font-weight: 700; margin: .2rem 0 .35rem; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+  .idea-head .date { color: var(--ink-faint); font-size: .78rem; }
+  .idea-head p.sum { color: var(--ink-soft); font-size: .9rem; margin: 0; }
 
-  footer {
-    margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
-    color: var(--ink-faint); font-size: 0.8rem;
+  .toolbar { display: flex; gap: .4rem; margin: 1rem 0 .8rem; }
+  .toolbar button {
+    font: inherit; font-size: .76rem; font-weight: 600; cursor: pointer;
+    color: var(--ink-soft); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: .25rem .7rem;
   }
+  .toolbar button:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* 트리: 루트 세로선 + 가지 아코디언 */
+  .tree { position: relative; padding-left: 1rem; }
+  .tree::before { content: ""; position: absolute; left: 0; top: .5rem; bottom: .5rem; width: 3px; border-radius: 2px; background: var(--accent); opacity: .35; }
+  .branch { margin-bottom: .5rem; }
+  .branch > summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center; gap: .5rem;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: .55rem .9rem; font-weight: 700; font-size: .92rem; user-select: none;
+  }
+  .branch > summary::-webkit-details-marker { display: none; }
+  .branch > summary:hover { border-color: var(--accent); }
+  .branch[open] > summary { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .branch > summary .n { margin-left: auto; font-size: .72rem; font-weight: 600; color: var(--ink-faint); }
+  .branch > summary .arrow { font-size: .7rem; color: var(--ink-faint); transition: transform .15s; }
+  .branch[open] > summary .arrow { transform: rotate(90deg); }
+  .branch.warn > summary { border-style: dashed; }
+  .branch.warn[open] > summary { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+
+  .leaves { padding: .45rem 0 .3rem 1.1rem; display: flex; flex-direction: column; gap: .3rem; }
+  .leaf { border-radius: 7px; }
+  .leaf > summary {
+    list-style: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: .45rem;
+    background: var(--leaf-bg); border: 1px solid transparent; border-radius: 7px;
+    padding: .35rem .75rem; font-size: .86rem; font-weight: 600; color: var(--ink); user-select: none;
+  }
+  .leaf > summary::-webkit-details-marker { display: none; }
+  .leaf > summary:hover { border-color: var(--accent); }
+  .leaf[open] > summary { background: var(--accent-soft); color: var(--accent); }
+  .leaf > summary .more { font-size: .68rem; color: var(--ink-faint); }
+  .leaf p { margin: .3rem 0 .5rem; padding: 0 .8rem; color: var(--ink-soft); font-size: .84rem; max-width: 60ch; }
+  .leaf.plain > summary { cursor: default; }
+  .leaf.plain > summary:hover { border-color: transparent; }
+
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: .78rem; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
 <div class="wrap">
   <header>
     <p class="eyebrow">ACE BED · Promotion Idea Board</p>
-    <h1>에이스침대 프로모션 아이디어 마인드맵</h1>
-    <p class="meta">최근 업데이트 2026-07-20 · 아이디어 3건 · 아이디어가 추가될 때마다 이 보드가 갱신됩니다</p>
+    <h1>에이스침대 프로모션 아이디어 보드</h1>
+    <p class="meta" id="meta"></p>
   </header>
 
-  <div class="board">
-<pre class="mermaid">
-mindmap
-  root((에이스침대<br/>프로모션<br/>아이디어))
-    IDEA 01 재구매 프로모션<br/>시몬스 벤치마킹
-      벤치마킹 포인트
-        오프라인 매장 한정 혜택
-        기존 고객 재구매 유도
-        매장 방문 트래픽 확보
-        구매이력 DB 활용
-      에이스 적용 방안
-        재구매 고객 전용 할인
-        교체주기 7~10년 고객 타겟팅
-        자녀방·세컨드 침대 수요 공략
-        프레임+매트리스 세트 업셀
-      차별화 포인트
-        기존 매트리스 보상판매
-        하이브리드 Z 등 신제품 체험 연계
-        멤버십 등급별 추가 혜택
-      실행 채널
-        전국 대리점·직영점
-        CRM 문자·알림톡
-        매장 방문 예약 시스템
-      KPI
-        재구매 전환율
-        매장 방문 수
-        객단가
-    IDEA 02 결제 혜택·편의 강화<br/>무이자 할부 경쟁력
-      현황 진단
-        PG 무이자 2~6개월 중심
-        6·12·18개월은 분담무이자<br/>매장+카드사 부담
-        롯데·하나·현대·삼성 4사만 지원
-        시몬스페이 최대 64개월 무이자 사례
-      단기 개선
-        카드사 제휴 확대<br/>신한·KB국민·우리·NH
-        성수기 장기 무이자 시즌 운영
-        간편결제 무이자 연동
-        할부 조건 자동 비교·시뮬레이터
-      중장기 전략
-        에이스 자체 할부 프로그램<br/>가칭 에이스페이
-        캐피탈 제휴 무카드 할부
-        매트리스 구독·렌탈+케어
-      비용 구조
-        본사·대리점·카드사 3자 분담
-        복수 PG 경쟁 입찰로 수수료 인하
-        프리미엄 라인에 혜택 집중
-      KPI
-        장기할부 이용률
-        결제 단계 이탈률
-        평균 객단가 변화
-    IDEA 03 웨딩멤버스<br/>생애주기 프로그램
-      핵심 구조
-        예랑예신 멤버십 가입
-        3~5년 내 자녀 침대 수요 발생
-        RAQUEL 패밀리침대로 전환 유도
-      혜택 설계
-        패밀리 업그레이드 쿠폰<br/>5년 유효 장기 쿠폰
-        출산 등록 시 축하 선물+할인
-        신혼 침대 보상판매 연계
-        아기 안전 옵션 패키지 증정
-      멤버십 확장
-        웨딩멤버스→패밀리멤버스 승급
-        자녀 성장 로드맵<br/>패밀리→주니어→학생 침대
-        추천 리워드 예비부부 소개
-      CRM 시나리오
-        구매 1주년 케어 메시지
-        3년차 패밀리침대 제안
-        자녀 출생년도 기반 자동 오퍼
-        임산부·아기 수면 콘텐츠
-      제휴 채널
-        산후조리원·산부인과
-        웨딩플래너·스튜디오
-        육아 플랫폼
-      KPI
-        멤버스 재구매 전환율
-        쿠폰 회수율
-        고객 생애가치 LTV
-</pre>
-  </div>
+  <nav id="nav" role="tablist" aria-label="아이디어 탭"></nav>
+  <main id="main"></main>
 
-  <h2><span class="idea-no">IDEA 01</span>오프라인 매장 한정 재구매 프로모션</h2>
-  <p class="added">2026-07-20 추가 · 시몬스 오프라인 매장 한정 재구매 프로모션 벤치마킹</p>
-
-  <h3>배경</h3>
-  <p>시몬스가 현재 <strong>오프라인 매장 한정 재구매 프로모션</strong>을 진행 중. 기존 구매 고객을 매장으로 다시 불러들여 재구매를 유도하는 구조로, 온라인 가격 경쟁을 피하면서 대리점 매출을 지원하는 방식이라 에이스침대도 충분히 벤치마킹 가능.</p>
-
-  <h3>왜 에이스에 잘 맞는가</h3>
-  <ul>
-    <li><strong>긴 교체주기 활용</strong> — 매트리스 교체주기(7~10년)가 도래한 과거 구매 고객 DB가 이미 확보되어 있어, 재구매 타이밍을 정확히 겨냥할 수 있음.</li>
-    <li><strong>오프라인 강점</strong> — 전국 대리점·직영점 네트워크가 촘촘해 "매장 한정" 구조가 대리점 상생 메시지로도 작동.</li>
-    <li><strong>가족 단위 확장 수요</strong> — 본인 재구매뿐 아니라 자녀방·세컨드 침대 수요로 객단가 확대 여지가 큼.</li>
-  </ul>
-
-  <h3>실행 아이디어 상세</h3>
-  <div class="grid">
-    <div class="card">
-      <h4>혜택 설계</h4>
-      <ul>
-        <li>재구매 고객 전용 할인율 + 사은품(경추 베개, 침구 세트 등)</li>
-        <li>기존 에이스 매트리스 <strong>보상판매(트레이드인)</strong> — 시몬스와 차별화되는 핵심 포인트</li>
-        <li>프레임+매트리스 동시 구매 시 추가 혜택으로 업셀 유도</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>고객 접점</h4>
-      <ul>
-        <li>CRM 구매이력 기준 7년 이상 경과 고객에 알림톡 발송</li>
-        <li>가까운 매장 방문 예약 링크 포함 → 방문 전환 측정 가능</li>
-        <li>매장에서 신제품 체험과 연계해 상위 라인 전환 유도</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>측정 지표</h4>
-      <ul>
-        <li>알림톡 → 매장 방문 전환율</li>
-        <li>재구매 전환율 및 재구매 객단가</li>
-        <li>보상판매 참여 건수 (차별화 요소 검증)</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>검토 필요 사항</h4>
-      <ul>
-        <li>보상판매 시 수거·폐기 물류 비용 및 프로세스</li>
-        <li>대리점 정산 구조 — 매장 한정 혜택의 마진 분담 협의</li>
-        <li>시몬스 프로모션 조건(할인 폭, 기간, 대상) 상세 조사</li>
-      </ul>
-    </div>
-  </div>
-
-  <h2><span class="idea-no">IDEA 02</span>결제 혜택·편의 강화 — 무이자 할부 경쟁력</h2>
-  <p class="added">2026-07-20 추가 · 시몬스페이(최대 64개월 무이자 사례) 대비 에이스 결제 조건 열세 대응</p>
-
-  <h3>현황 진단</h3>
-  <ul>
-    <li><strong>에이스 현재</strong> — PG사 월별 수수료율 기준 무이자 최대 2~6개월. 6/12/18개월도 있으나 <strong>매장+카드사 분담무이자</strong>라 매장 부담이 발생하고, 지원 카드사도 롯데·하나·현대·삼성 4곳뿐.</li>
-    <li><strong>시몬스</strong> — 자체 시몬스페이로 최대 64개월 무이자까지 진행한 사례가 있어, 고가 매트리스의 월 부담금을 크게 낮추는 강력한 구매 전환 장치로 작동.</li>
-    <li><strong>핵심 격차</strong> — 시장점유율이 큰 신한·KB국민 카드 고객은 사실상 무이자 혜택에서 배제되고, 100만원대 이상 프리미엄 제품에서 "월 얼마" 메시지를 시몬스처럼 쓰기 어려움.</li>
-  </ul>
-
-  <h3>실행 아이디어 상세</h3>
-  <div class="grid">
-    <div class="card">
-      <h4>단기 — 지금 구조에서 넓히기</h4>
-      <ul>
-        <li><strong>카드사 제휴 확대</strong> — 신한·KB국민·우리·NH 추가로 커버리지부터 해소 (점유율 상위사 부재가 가장 큰 이탈 요인)</li>
-        <li><strong>시즌 집중 장기 무이자</strong> — 혼수·이사철 성수기에만 12~24개월 분담무이자를 한시 운영해 비용을 기간에 집중</li>
-        <li><strong>간편결제 연동</strong> — 네이버페이·카카오페이·삼성페이 결제 시에도 카드 무이자 조건이 그대로 적용되도록 PG 설정 정비</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>중장기 — 가칭 "에이스페이"</h4>
-      <ul>
-        <li><strong>캐피탈 제휴 자체 할부</strong> — 카드 한도와 무관한 무카드 장기 할부(24~60개월)로 시몬스페이에 정면 대응</li>
-        <li><strong>구독·렌탈 모델</strong> — 월 구독료에 매트리스 케어(살균·로테이션)를 묶어 "소유 부담 없는 프리미엄" 포지셔닝</li>
-        <li><strong>보상판매 연계</strong> — IDEA 01의 트레이드인 보상금을 첫 할부금에서 차감해 초기 부담 제로 설계</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>편의 — 고객이 체감하는 지점</h4>
-      <ul>
-        <li><strong>할부 시뮬레이터</strong> — 온라인·매장 태블릿에서 카드사별 무이자 조건을 자동 비교, "이 카드면 월 ○○원" 즉시 안내</li>
-        <li><strong>직원용 조견표 자동화</strong> — 매월 바뀌는 PG 무이자 조건을 수기 공지 대신 매장 시스템에 자동 반영해 안내 오류 방지</li>
-        <li><strong>견적서에 월 납부액 병기</strong> — 총액 대신 월 부담금 중심으로 가격 커뮤니케이션 전환</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>비용 구조 · 검토 필요 사항</h4>
-      <ul>
-        <li><strong>3자 분담 재설계</strong> — 분담무이자 비용을 본사·대리점·카드사가 나누는 구조로 매장 부담 완화 (대리점 참여율 제고)</li>
-        <li><strong>복수 PG 경쟁 입찰</strong> — 월별 수수료율 협상력 확보</li>
-        <li><strong>규제 검토</strong> — 자체 할부는 할부거래법·여신 규제 적용 여부와 캐피탈사 제휴 구조(누가 여신 주체인지) 법무 검토 필수</li>
-        <li><strong>손익 시뮬레이션</strong> — 장기 무이자 비용 대비 객단가 상승·전환율 개선 효과 검증 (프리미엄 라인 한정 운영안 포함)</li>
-      </ul>
-    </div>
-  </div>
-
-  <h2><span class="idea-no">IDEA 03</span>웨딩멤버스 생애주기 프로그램 — 신혼에서 패밀리까지 <span class="tag new">NEW</span></h2>
-  <p class="added">2026-07-20 추가 · 웨딩멤버스(예랑예신 멤버십) 고객의 3~5년 내 자녀 침대 수요를 RAQUEL 패밀리침대로 연결</p>
-
-  <h3>핵심 구조</h3>
-  <p>웨딩멤버스는 가입 시점부터 <strong>"3~5년 뒤 수요가 예측되는 고객 명단"</strong>이라는 점이 최대 자산. 신혼 침대 구매(1차) → 출산 후 RAQUEL 패밀리침대(2차) → 자녀 성장에 따른 주니어·학생 침대(3차)로 이어지는 <strong>생애주기 판매 파이프라인</strong>으로 설계하면, 단발 혜택이 아니라 한 가족의 침대 전부를 에이스로 가져올 수 있음.</p>
-
-  <h3>혜택 설계 (제안하신 아이디어의 구체화)</h3>
-  <ul>
-    <li><strong>패밀리 업그레이드 쿠폰</strong> — 웨딩멤버스 가입 시 RAQUEL 등 패밀리침대 전용 할인 쿠폰을 <strong>유효기간 5년</strong>으로 발급. 당장 쓰지 않아도 "아이 생기면 에이스"라는 락인이 걸리고, 쿠폰 회수 시점이 곧 재구매 시점.</li>
-    <li><strong>출산 축하 프로그램</strong> — 멤버스 고객이 출산을 등록하면 축하 선물(아기 침구 등) + 패밀리침대 할인. 출산 정보는 민감정보이므로 강제 수집이 아니라 <strong>등록하면 혜택을 주는 자발적 방식</strong>으로.</li>
-    <li><strong>신혼 침대 보상판매 연계(IDEA 01)</strong> — 신혼 때 산 퀸 침대를 반납·보상받고 RAQUEL로 갈아타는 트레이드인 트랙. "침대가 좁아져서 못 바꾼다"는 패밀리침대 전환 장벽을 정면으로 해소.</li>
-    <li><strong>아기 안전 패키지 증정</strong> — RAQUEL 구매 시 가드레일·낙상매트 등 안전 옵션을 패키지로 증정해 "아이와 함께 자는 침대"라는 제품 맥락을 혜택으로 표현.</li>
-  </ul>
-
-  <h3>확장 아이디어 (추가 제안)</h3>
-  <div class="grid">
-    <div class="card">
-      <h4>멤버십 구조 확장</h4>
-      <ul>
-        <li><strong>웨딩멤버스 → 패밀리멤버스 자동 승급</strong> — 출산 등록 시 등급이 올라가며 혜택이 갱신되는 2단계 멤버십. 멤버십이 결혼 시점에서 끝나지 않고 계속 살아있게 됨</li>
-        <li><strong>자녀 성장 로드맵</strong> — 출생년도를 등록하면 패밀리침대(0~4세) → 주니어 침대(5~7세) → 학생 침대(초등 입학) 시점마다 오퍼가 자동 발송되는 장기 CRM</li>
-        <li><strong>추천 리워드</strong> — 멤버스가 지인 예비부부를 소개하면 양쪽 모두 혜택. 결혼 적령기 네트워크 특성상 확산 효율이 높음</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>CRM 시나리오</h4>
-      <ul>
-        <li><strong>구매 1주년 케어</strong> — 매트리스 관리 안내 등 판매 없는 접촉으로 관계 유지</li>
-        <li><strong>3년차 시그널 캠페인</strong> — 가입 3년차부터 패밀리침대 콘텐츠 노출 시작</li>
-        <li><strong>수면 콘텐츠 자산화</strong> — 임산부 수면, 신생아 수면 교육 콘텐츠를 멤버스 전용으로 제공. "침대는 과학" 브랜드 자산과 정확히 맞물리는 접점</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>제휴 채널</h4>
-      <ul>
-        <li><strong>산후조리원·산부인과 제휴</strong> — 출산 시점 고객을 정확히 만나는 채널. 조리원 내 패밀리침대 체험존도 검토 가능</li>
-        <li><strong>웨딩플래너·스튜디오 제휴</strong> — 웨딩멤버스 가입 자체를 늘리는 입구 확대</li>
-        <li><strong>육아 플랫폼 제휴</strong> — 육아 커뮤니티·앱과 공동 프로모션으로 RAQUEL 인지도 확보</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h4>타 아이디어 연계 · 검토 사항</h4>
-      <ul>
-        <li><strong>IDEA 02 연계</strong> — 패밀리침대는 육아기 지출 부담이 큰 시기의 구매이므로 장기 무이자·자체 할부를 우선 적용하면 시너지 극대화</li>
-        <li><strong>개인정보 검토</strong> — 출산·자녀 정보는 수집 목적·보관 기간 명시와 별도 동의 필수</li>
-        <li><strong>쿠폰 회계 처리</strong> — 5년 유효 쿠폰의 충당부채 처리 방식 재무 협의</li>
-        <li><strong>측정</strong> — 웨딩멤버스 가입 → 2차 구매 전환율, 쿠폰 회수율, 가족 단위 LTV를 핵심 지표로</li>
-      </ul>
-    </div>
-  </div>
-
-  <footer>에이스침대 프로모션 아이디어 보드 · 새 아이디어가 추가되면 마인드맵과 상세 카드가 함께 갱신됩니다.</footer>
+  <footer>탭에서 아이디어를 고르고, 가지를 클릭해 펼쳐 보세요. "자세히" 표시가 있는 항목은 한 번 더 클릭하면 설명이 열립니다.</footer>
 </div>
+
+<script>
+const IDEAS = [
+  {
+    id: "01",
+    title: "오프라인 매장 한정 재구매 프로모션",
+    date: "2026-07-20",
+    summary: "시몬스의 오프라인 한정 재구매 프로모션을 벤치마킹해, 교체주기가 도래한 기존 고객을 매장으로 다시 부르는 프로그램.",
+    keywords: ["시몬스 벤치마킹", "보상판매", "교체주기 타겟팅"],
+    branches: [
+      { name: "벤치마킹 포인트", leaves: [
+        { t: "오프라인 매장 한정 혜택", d: "온라인 가격 경쟁을 피하면서 대리점 매출을 지원하는 구조. 대리점 상생 메시지로도 작동한다." },
+        { t: "기존 고객 재구매 유도", d: "이미 확보된 구매이력 DB를 활용해 신규 획득 비용 없이 매출을 만든다." },
+        { t: "매장 방문 트래픽 확보", d: "방문 예약 링크를 통해 유입시키면 방문 전환까지 측정할 수 있다." },
+      ]},
+      { name: "에이스 적용 방안", leaves: [
+        { t: "재구매 전용 할인 + 사은품", d: "재구매 고객 전용 할인율에 경추 베개·침구 세트 등 사은품을 결합." },
+        { t: "교체주기 7~10년 고객 타겟팅", d: "구매 후 7년 이상 경과한 고객에게 알림톡으로 재구매 시점을 정확히 겨냥." },
+        { t: "자녀방·세컨드 침대 수요 공략", d: "본인 재구매 외에 가족 단위 확장 수요로 객단가를 키운다." },
+        { t: "프레임+매트리스 세트 업셀", d: "동시 구매 시 추가 혜택으로 객단가 상승 유도." },
+      ]},
+      { name: "차별화 포인트", leaves: [
+        { t: "기존 매트리스 보상판매(트레이드인)", d: "시몬스에 없는 핵심 차별점. 기존 침대 처분 부담을 없애 재구매 장벽을 제거한다." },
+        { t: "신제품 체험 연계", d: "매장 방문 시 신제품 체험으로 상위 라인 전환을 유도." },
+        { t: "멤버십 등급별 추가 혜택", d: "멤버십과 연계해 충성 고객일수록 혜택이 커지는 구조." },
+      ]},
+      { name: "실행 채널", leaves: [
+        { t: "전국 대리점·직영점" },
+        { t: "CRM 문자·알림톡", d: "구매이력 기준 대상 추출 후 발송." },
+        { t: "매장 방문 예약 시스템", d: "알림톡 → 예약 → 방문 → 구매의 전환 퍼널을 측정 가능하게 설계." },
+      ]},
+      { name: "KPI", leaves: [
+        { t: "알림톡 → 방문 전환율" }, { t: "재구매 전환율·객단가" }, { t: "보상판매 참여 건수" },
+      ]},
+      { name: "검토 필요", warn: true, leaves: [
+        { t: "보상판매 물류", d: "수거·폐기 비용과 프로세스 설계 필요." },
+        { t: "대리점 정산 구조", d: "매장 한정 혜택의 마진 분담 협의." },
+        { t: "시몬스 조건 상세 조사", d: "할인 폭·기간·대상 파악 후 우리 조건 설계." },
+      ]},
+    ],
+  },
+  {
+    id: "02",
+    title: "결제 혜택·편의 강화 — 무이자 할부 경쟁력",
+    date: "2026-07-20",
+    summary: "시몬스페이(최대 64개월 무이자 사례) 대비 열세인 할부 조건을, 단기 커버리지 확대와 중장기 자체 할부로 따라잡는 전략.",
+    keywords: ["카드사 확대", "에이스페이", "할부 시뮬레이터"],
+    branches: [
+      { name: "현황 진단", leaves: [
+        { t: "PG 무이자 최대 2~6개월", d: "매월 수수료율이 바뀌는 PG 무이자 중심이라 조건이 짧고 유동적." },
+        { t: "6·12·18개월은 분담무이자", d: "매장과 카드사가 비용을 부담하는 구조라 매장 참여에 한계." },
+        { t: "카드 4사만 지원", d: "롯데·하나·현대·삼성만 지원. 점유율 상위 신한·KB국민 고객이 통째로 배제되는 게 최대 구멍." },
+        { t: "시몬스페이 최대 64개월 사례", d: "고가 매트리스의 월 부담금을 크게 낮추는 강력한 구매 전환 장치." },
+      ]},
+      { name: "단기 개선", leaves: [
+        { t: "카드사 제휴 확대", d: "신한·KB국민·우리·NH 추가. 개월 수 확대보다 커버리지 구멍을 메우는 게 비용 대비 효과가 크다." },
+        { t: "성수기 한정 장기 무이자", d: "혼수·이사철에만 12~24개월을 한시 운영해 예산을 필요한 시점에 집중." },
+        { t: "간편결제 무이자 연동", d: "네이버페이·카카오페이 경유 결제에도 카드 무이자가 동일 적용되도록 PG 설정 정비." },
+      ]},
+      { name: "중장기 — 가칭 에이스페이", leaves: [
+        { t: "캐피탈 제휴 무카드 할부", d: "카드 한도와 무관한 24~60개월 자체 할부로 시몬스페이에 정면 대응." },
+        { t: "구독·렌탈 모델", d: "월 구독료에 살균·로테이션 케어를 묶어 '소유 부담 없는 프리미엄' 포지셔닝." },
+        { t: "보상판매 연계 (IDEA 01)", d: "트레이드인 보상금을 첫 할부금에서 차감해 '초기 부담 0원' 메시지 가능." },
+      ]},
+      { name: "고객 편의", leaves: [
+        { t: "할부 시뮬레이터", d: "온라인·매장 태블릿에서 카드사별 조건 자동 비교 — '이 카드면 월 ○○원' 즉시 안내." },
+        { t: "직원용 조견표 자동화", d: "매월 바뀌는 무이자 조건을 매장 시스템에 자동 반영해 안내 오류 방지." },
+        { t: "견적서에 월 납부액 병기", d: "총액이 아닌 월 부담금 중심으로 가격 커뮤니케이션 전환." },
+      ]},
+      { name: "KPI", leaves: [
+        { t: "장기할부 이용률" }, { t: "결제 단계 이탈률" }, { t: "평균 객단가 변화" },
+      ]},
+      { name: "검토 필요", warn: true, leaves: [
+        { t: "3자 분담 재설계", d: "분담무이자 비용을 본사·대리점·카드사가 나눠 매장 부담 완화." },
+        { t: "복수 PG 경쟁 입찰", d: "월별 수수료율 협상력 확보." },
+        { t: "여신 규제 법무 검토", d: "자체 할부의 할부거래법 적용 여부, 캐피탈 제휴 시 여신 주체 설계." },
+        { t: "손익 시뮬레이션", d: "장기 무이자 비용 대비 전환율·객단가 개선 효과 검증. 프리미엄 라인 한정안 포함." },
+      ]},
+    ],
+  },
+  {
+    id: "03",
+    title: "웨딩멤버스 생애주기 프로그램",
+    date: "2026-07-20",
+    summary: "예랑예신 멤버십을 신혼 → 출산 → 육아로 이어지는 판매 파이프라인으로 확장하고, RAQUEL 패밀리침대 전환을 유도.",
+    keywords: ["RAQUEL", "5년 쿠폰", "패밀리멤버스"],
+    branches: [
+      { name: "핵심 구조", leaves: [
+        { t: "수요가 예측되는 고객 명단", d: "웨딩멤버스는 가입 시점부터 '3~5년 뒤 자녀 침대 수요가 예측되는 명단'이라는 것이 최대 자산." },
+        { t: "3단계 파이프라인", d: "신혼 침대(1차) → RAQUEL 패밀리침대(2차) → 주니어·학생 침대(3차)로 한 가족의 침대 전부를 에이스로." },
+      ]},
+      { name: "혜택 설계", leaves: [
+        { t: "패밀리 업그레이드 쿠폰 (5년 유효)", d: "가입 시 패밀리침대 전용 쿠폰을 5년 유효로 발급. '아이 생기면 에이스' 락인이 걸리고, 쿠폰 회수 시점이 곧 재구매 시점." },
+        { t: "출산 축하 프로그램", d: "출산 등록 시 축하 선물 + 패밀리침대 할인. 민감정보이므로 등록하면 혜택을 주는 자발적 방식으로." },
+        { t: "신혼 침대 트레이드인 (IDEA 01)", d: "신혼 때 산 퀸 침대를 보상판매로 받아 '기존 침대 처분'이라는 전환 장벽을 제거." },
+        { t: "아기 안전 패키지 증정", d: "RAQUEL 구매 시 가드레일·낙상매트 증정 — '아이와 함께 자는 침대' 맥락을 혜택으로 표현." },
+      ]},
+      { name: "멤버십 확장", leaves: [
+        { t: "패밀리멤버스 자동 승급", d: "출산 등록 시 등급 상승·혜택 갱신. 멤버십이 결혼 시점에서 소멸하지 않고 계속 살아있게 된다." },
+        { t: "자녀 성장 로드맵", d: "출생년도 등록 시 패밀리침대(0~4세) → 주니어(5~7세) → 학생 침대(초등 입학) 시점마다 오퍼 자동 발송." },
+        { t: "추천 리워드", d: "예비부부 주변엔 예비부부가 많다. 소개 시 양쪽 혜택으로 가입 입구 확대." },
+      ]},
+      { name: "CRM 시나리오", leaves: [
+        { t: "구매 1주년 케어 메시지", d: "매트리스 관리 안내 등 판매 없는 접촉으로 관계 유지." },
+        { t: "3년차 시그널 캠페인", d: "가입 3년차부터 패밀리침대 콘텐츠 노출 시작." },
+        { t: "수면 콘텐츠 자산화", d: "임산부·신생아 수면 콘텐츠를 멤버스 전용 제공 — '침대는 과학' 브랜드 자산과 맞물리는 접점." },
+      ]},
+      { name: "제휴 채널", leaves: [
+        { t: "산후조리원·산부인과", d: "출산 시점 고객을 가장 정확히 만나는 채널. 조리원 내 체험존도 검토." },
+        { t: "웨딩플래너·스튜디오", d: "웨딩멤버스 가입 입구 자체를 확대." },
+        { t: "육아 플랫폼", d: "육아 커뮤니티·앱과 공동 프로모션으로 RAQUEL 인지도 확보." },
+      ]},
+      { name: "KPI", leaves: [
+        { t: "멤버스 2차 구매 전환율" }, { t: "쿠폰 회수율" }, { t: "가족 단위 LTV" },
+      ]},
+      { name: "검토 필요", warn: true, leaves: [
+        { t: "개인정보 동의", d: "출산·자녀 정보는 수집 목적·보관 기간 명시와 별도 동의 필수." },
+        { t: "쿠폰 회계 처리", d: "5년 유효 쿠폰의 충당부채 처리 방식 재무 협의." },
+      ]},
+    ],
+  },
+];
+
+const SYNERGY = "IDEA 01의 보상판매 트레이드인이 IDEA 02의 '첫 할부금 차감'과 IDEA 03의 '신혼 침대 → RAQUEL 전환'에 모두 연결됩니다. 세 아이디어를 묶으면 \"기존 침대 반납 → 보상금으로 초기 부담 0원 → 장기 무이자로 월 부담 최소화\"라는 하나의 패밀리 전환 패키지가 됩니다.";
+
+const nav = document.getElementById("nav");
+const main = document.getElementById("main");
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+document.getElementById("meta").textContent =
+  `최근 업데이트 ${IDEAS[IDEAS.length-1].date} · 아이디어 ${IDEAS.length}건`;
+
+/* 탭 */
+const tabs = [{ id: "overview", label: "전체 개요" }, ...IDEAS.map(i => ({ id: i.id, label: `IDEA ${i.id}` }))];
+tabs.forEach(t => {
+  const b = document.createElement("button");
+  b.textContent = t.label; b.dataset.tab = t.id;
+  b.setAttribute("role", "tab");
+  b.addEventListener("click", () => select(t.id));
+  nav.appendChild(b);
+});
+
+/* 개요 섹션 */
+const ov = document.createElement("section");
+ov.dataset.tab = "overview";
+ov.innerHTML = `
+  <div class="ov-grid">
+    ${IDEAS.map(i => `
+      <button class="ov-card" data-goto="${i.id}">
+        <span class="ov-top"><span class="idea-no">IDEA ${i.id}</span><span class="ov-title">${esc(i.title)}</span></span>
+        <p class="ov-sum">${esc(i.summary)}</p>
+        <span class="chips">${i.keywords.map(k => `<span class="chip">${esc(k)}</span>`).join("")}</span>
+      </button>`).join("")}
+  </div>
+  <div class="synergy"><h3>아이디어 간 연결</h3><p>${esc(SYNERGY)}</p></div>`;
+main.appendChild(ov);
+ov.querySelectorAll("[data-goto]").forEach(b => b.addEventListener("click", () => select(b.dataset.goto)));
+
+/* 아이디어 섹션 */
+IDEAS.forEach(idea => {
+  const s = document.createElement("section");
+  s.dataset.tab = idea.id;
+  s.innerHTML = `
+    <div class="idea-head">
+      <h2><span class="idea-no">IDEA ${idea.id}</span>${esc(idea.title)}</h2>
+      <p class="sum">${esc(idea.summary)}</p>
+      <span class="date">${idea.date} 추가</span>
+    </div>
+    <div class="toolbar">
+      <button data-act="open">모두 펼치기</button>
+      <button data-act="close">모두 접기</button>
+    </div>
+    <div class="tree">
+      ${idea.branches.map((br, bi) => `
+        <details class="branch${br.warn ? " warn" : ""}"${bi === 0 ? " open" : ""}>
+          <summary><span class="arrow">▶</span>${esc(br.name)}<span class="n">${br.leaves.length}</span></summary>
+          <div class="leaves">
+            ${br.leaves.map(l => l.d
+              ? `<details class="leaf"><summary>${esc(l.t)}<span class="more">자세히</span></summary><p>${esc(l.d)}</p></details>`
+              : `<details class="leaf plain"><summary tabindex="-1">${esc(l.t)}</summary></details>`
+            ).join("")}
+          </div>
+        </details>`).join("")}
+    </div>`;
+  s.querySelector('[data-act="open"]').addEventListener("click", () => s.querySelectorAll("details").forEach(d => d.open = true));
+  s.querySelector('[data-act="close"]').addEventListener("click", () => s.querySelectorAll("details").forEach(d => d.open = false));
+  main.appendChild(s);
+});
+
+function select(id) {
+  nav.querySelectorAll("button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === id));
+  main.querySelectorAll("section").forEach(sec => sec.hidden = sec.dataset.tab !== id);
+}
+select("overview");
+</script>
